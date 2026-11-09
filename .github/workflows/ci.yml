@@ -1,5 +1,6 @@
 # GitBell 테스트.
-# - windows: Windows판 단위·E2E 테스트, 그리고 `npx gitbell`과 같은 설치기로 실제 설치 → 실행 → 제거까지 확인
+# - windows: Windows판 단위·E2E 테스트, 그리고 `npx gitbell`과 같은 설치기로 실제 설치 → 실행 →
+#            설정 → 앱에서 제거(등록된 제거 명령) → 다시 설치 → npx로 제거까지 확인
 # - linux:   Windows판 테스트를 Linux(xvfb)에서도 돌려 플랫폼에 기대지 않는 부분을 확인
 # - macos:   macOS판 Swift 테스트와 앱 빌드
 name: CI
@@ -54,20 +55,53 @@ jobs:
           $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
           Write-Output "shortcut -> $($link.TargetPath) $($link.Arguments)"
           if ($link.TargetPath -notlike "$app*electron.exe") { throw "shortcut target is wrong" }
+          # 설정 → 앱 → 설치된 앱 목록 등록
+          $entry = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GitBell'
+          $entry | Format-List DisplayName, DisplayVersion, Publisher, DisplayIcon, InstallLocation, UninstallString, QuietUninstallString, EstimatedSize, NoModify
+          $version = node -p "require('./package.json').version"
+          if ($entry.DisplayName -ne 'GitBell' -or $entry.DisplayVersion -ne $version) { throw 'uninstall entry is wrong' }
+          if ($entry.UninstallString -ne "`"$app\windows\node_modules\electron\dist\electron.exe`" `"$app\windows`" --uninstall-app") { throw 'UninstallString is wrong' }
+          if (-not (Test-Path $entry.DisplayIcon)) { throw 'DisplayIcon is missing' }
+          if ($entry.EstimatedSize -lt 10000) { throw 'EstimatedSize looks wrong' }
           Start-Sleep -Seconds 5
           $running = Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" | Where-Object { $_.ExecutablePath -like "$app*" }
           if (-not $running) { throw 'GitBell is not running' }
           Write-Output "running: $($running.Count) processes"
       - name: Install again (update while running)
         run: node bin/gitbell.js
-      - name: Uninstall
-        run: node bin/gitbell.js uninstall --purge
-      - name: Check it is gone
+      - name: Remove from Settings → Apps (run the registered uninstall command)
+        run: |
+          # Windows가 하는 것처럼 등록된 명령을 그대로 실행한다(확인 창 없는 QuietUninstallString).
+          $entry = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GitBell'
+          $script = Join-Path $env:RUNNER_TEMP 'uninstall.cmd'
+          Set-Content -Path $script -Value $entry.QuietUninstallString -Encoding ascii
+          & cmd.exe /d /c $script
+          if ($LASTEXITCODE -ne 0) { throw "uninstall command failed: $LASTEXITCODE" }
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\GitBell'
+          for ($i = 0; $i -lt 60 -and (Test-Path $app); $i++) { Start-Sleep -Seconds 1 }
+      - name: Check it is gone (Settings → Apps)
+        run: |
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\GitBell'
+          $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\GitBell.lnk'
+          foreach ($path in @($app, $shortcut, 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GitBell')) {
+            if (Test-Path $path) { throw "still there: $path" }
+          }
+          $running = Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" | Where-Object { $_.ExecutablePath -like "$app*" }
+          if ($running) { throw 'GitBell is still running' }
+          if (-not (Test-Path (Join-Path $env:APPDATA 'GitBell'))) { throw 'settings should be kept without the checkbox' }
+      - name: Install, then uninstall with npx gitbell uninstall --purge
+        run: |
+          node bin/gitbell.js
+          if ($LASTEXITCODE -ne 0) { throw 'install failed' }
+          Start-Sleep -Seconds 5
+          node bin/gitbell.js uninstall --purge
+          if ($LASTEXITCODE -ne 0) { throw 'uninstall failed' }
+      - name: Check it is gone (npx)
         run: |
           Start-Sleep -Seconds 3
           $app = Join-Path $env:LOCALAPPDATA 'Programs\GitBell'
           $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\GitBell.lnk'
-          foreach ($path in @($app, $shortcut, (Join-Path $env:APPDATA 'GitBell'))) {
+          foreach ($path in @($app, "$app.new", $shortcut, (Join-Path $env:APPDATA 'GitBell'), 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GitBell')) {
             if (Test-Path $path) { throw "still there: $path" }
           }
           $running = Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" | Where-Object { $_.ExecutablePath -like "$app*" }

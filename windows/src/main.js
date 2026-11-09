@@ -4,7 +4,9 @@
 // 설치기(bin/gitbell.js)가 쓰는 명령:
 //   --create-shortcut  시작 메뉴 바로가기를 만들고 끝낸다(알림에 앱 이름과 아이콘이 보이려면 필요하다)
 //   --quit             실행 중인 GitBell을 끝낸다
-//   --uninstall        실행 중인 GitBell을 끝내고, 로그인 시 실행과 시작 메뉴 바로가기를 지운다
+//   --uninstall        실행 중인 GitBell을 끝내고, 로그인 시 실행·시작 메뉴 바로가기·설치된 앱 등록을 지운다
+// Windows "설정 → 앱 → 설치된 앱"의 제거 버튼이 쓰는 명령(uninstall.js 참고):
+//   --uninstall-app [--quiet]  확인 창을 띄우고(--quiet면 생략) 앱을 지운다
 // 확인·스크린숏용:
 //   --demo   가상 자료로 띄운다(GitHub에 요청하지 않고 아무것도 저장하지 않는다)
 //   --show   시작하자마자 패널을 연다
@@ -12,9 +14,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const {
   app, BrowserWindow, Tray, Menu, Notification, nativeImage, nativeTheme, ipcMain, shell, clipboard, safeStorage,
-  screen, systemPreferences,
+  screen, systemPreferences, dialog,
 } = require('electron');
 
 const { AppModel, URLS } = require('./app-model');
@@ -25,8 +28,9 @@ const { createGitHubAPI } = require('./core/github-api');
 const { panelPosition, MARGIN } = require('./window-position');
 const { demoState } = require('./demo-data');
 const { repoName } = require('./core/models');
+const Uninstall = require('./uninstall');
 
-const BUNDLE_ID = 'io.github.kgyujin.gitbell';
+const BUNDLE_ID = Uninstall.BUNDLE_ID;
 const PANEL_WIDTH = 420;
 const NOTIFICATION_LIMIT = 5;
 const ICON = path.join(__dirname, '..', 'assets', 'icon.png');
@@ -34,7 +38,8 @@ const ICON_ICO = path.join(__dirname, '..', 'assets', 'icon.ico');
 
 const has = (flag) => process.argv.includes(flag);
 const isDemo = has('--demo');
-const task = ['--create-shortcut', '--quit', '--uninstall'].find(has);
+const TASKS = ['--create-shortcut', '--quit', '--uninstall', '--uninstall-app'];
+const task = TASKS.find(has);
 
 if (process.platform === 'win32') app.setAppUserModelId(BUNDLE_ID);
 if (process.env.GITBELL_DATA_DIR) app.setPath('userData', path.resolve(process.env.GITBELL_DATA_DIR));
@@ -58,14 +63,55 @@ function runTask() {
   if (task === '--uninstall') {
     if (process.platform === 'win32') app.setLoginItemSettings(loginItem(false));
     fs.rmSync(shortcutPath(), { force: true });
+    if (process.platform === 'win32') Uninstall.removeIntegration();
   }
+}
+
+/** 제거할지 묻는다. 설정·기록·토큰도 지울지 고를 수 있다(기본은 남긴다). */
+async function confirmUninstall(texts) {
+  const { response, checkboxChecked } = await dialog.showMessageBox({
+    type: 'question',
+    title: texts.t('Uninstall GitBell'),
+    message: texts.t('Uninstall GitBell from this PC?'),
+    checkboxLabel: texts.t('Also delete settings, history and the saved token'),
+    buttons: [texts.t('Uninstall'), texts.t('Cancel')],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+    icon: nativeImage.createFromPath(ICON),
+  });
+  return { ok: response === 0, purge: checkboxChecked };
+}
+
+/**
+ * 앱을 지운다: 로그인 시 실행·바로가기·설치된 앱 등록을 지우고, 이 프로세스가 끝난 뒤 앱 폴더(와 고르면 설정 폴더)를 지운다.
+ * 설치기가 설치한 자리에서 돌 때만 폴더를 지운다(개발 중인 소스 폴더는 건드리지 않는다).
+ */
+function uninstallApp({ purge }) {
+  if (process.platform !== 'win32') return;
+  app.setLoginItemSettings(loginItem(false));
+  Uninstall.removeIntegration();
+  const dirs = [];
+  if (Uninstall.isStandardInstall(app.getAppPath())) dirs.push(Uninstall.installPaths().installDir);
+  if (purge) dirs.push(app.getPath('userData'));
+  Uninstall.scheduleRemoval(dirs);
+}
+
+/** 설정 → 앱에서 "제거"를 눌렀을 때(별도 프로세스). 실행 중인 GitBell은 확인한 뒤에 끝낸다. */
+async function runUninstallApp() {
+  const texts = createL10n({ korean: prefersKorean(app.getPreferredSystemLanguages()) });
+  const { ok, purge } = has('--quiet') ? { ok: true, purge: false } : await confirmUninstall(texts);
+  if (!ok) return;
+  spawnSync(process.execPath, [app.getAppPath(), '--quit'], { timeout: 30000, windowsHide: true });
+  uninstallApp({ purge });
 }
 
 // 이미 실행 중이면 그쪽이 second-instance로 명령을 받는다(--quit·--uninstall이면 끝나고, 아니면 패널을 연다).
 const gotLock = app.requestSingleInstanceLock();
 if (task) {
-  app.whenReady().then(() => {
-    runTask();
+  app.whenReady().then(async () => {
+    if (task === '--uninstall-app') await runUninstallApp();
+    else runTask();
     app.exit(0);
   });
 } else if (!gotLock) {
@@ -73,7 +119,7 @@ if (task) {
 } else {
   app.on('second-instance', (_event, argv) => {
     if (argv.includes('--quit') || argv.includes('--uninstall')) app.quit();
-    else if (!argv.includes('--create-shortcut')) showPanel();
+    else if (!TASKS.some((flag) => argv.includes(flag))) showPanel();
   });
   // 패널은 닫지 않고 숨기므로 창이 없다고 끝나지 않게 한다.
   app.on('window-all-closed', () => {});
@@ -227,8 +273,19 @@ function createTray() {
     { label: l10n.t('Open GitBell'), click: showPanel },
     { label: l10n.t('Refresh'), click: () => model.refresh() },
     { type: 'separator' },
+    // 설치기가 설치한 앱에서만 보인다(개발 중에는 지울 폴더가 없다).
+    ...(process.platform === 'win32' && Uninstall.isStandardInstall(app.getAppPath())
+      ? [{ label: l10n.t('Uninstall GitBell…'), click: uninstallFromTray }] : []),
     { label: l10n.t('Quit GitBell'), click: () => app.quit() },
   ]));
+}
+
+async function uninstallFromTray() {
+  const { ok, purge } = await confirmUninstall(l10n);
+  if (!ok) return;
+  model.stop();
+  uninstallApp({ purge });
+  app.exit(0);
 }
 
 /** 작업 표시줄이 어두운지. 작업 표시줄은 앱 테마가 아니라 Windows 테마를 따른다. */
