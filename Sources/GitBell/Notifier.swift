@@ -1,5 +1,5 @@
 // macOS 알림. 알림을 누르면 해당 GitHub 페이지가 열리고 그 항목은 읽음이 된다.
-// 한 번에 새 항목이 많으면(5개 초과) 요약 알림 하나로 묶는다.
+// 한 번에 새 항목이 많으면(5개 초과) 요약 알림 하나로 묶는다. 어떤 항목을 알릴지는 AppModel이 고른다.
 
 import AppKit
 import GitBellCore
@@ -10,26 +10,28 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let individualLimit = 5
 
     /// 앱 번들 없이(`swift run`) 실행하면 알림 센터를 쓸 수 없어 건너뛴다.
-    private var isAvailable: Bool { Bundle.main.bundleIdentifier != nil }
+    private var isAvailable: Bool { Bundle.main.bundleIdentifier != nil && !SnapshotMode.isOn }
 
     func setUp() {
         guard isAvailable else { return }
-        let center = UNUserNotificationCenter.current()
-        center.delegate = self
-        center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().delegate = self
+        requestAuthorization {}
     }
 
-    func post(_ events: [ActivityEvent]) {
+    func requestAuthorization(_ completion: @escaping @Sendable () -> Void) {
+        guard isAvailable else { return completion() }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in completion() }
+    }
+
+    func post(_ events: [ActivityEvent], playsSound: Bool) {
         guard isAvailable, !events.isEmpty else { return }
-        let center = UNUserNotificationCenter.current()
         if events.count > individualLimit {
             let content = UNMutableNotificationContent()
             content.title = "GitBell"
             content.subtitle = String(format: L10n.string("%lld new activities"), events.count)
             content.body = Array(Set(events.map(\.repoName))).sorted().joined(separator: ", ")
             content.userInfo = ["url": "https://github.com/notifications"]
-            content.sound = .default
-            center.add(UNNotificationRequest(identifier: "summary-\(UUID())", content: content, trigger: nil))
+            add(content, id: "summary-\(UUID())", playsSound: playsSound)
             return
         }
         for event in events {
@@ -39,9 +41,24 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             content.body = L10n.title(event)
             content.userInfo = ["url": event.url.absoluteString, "id": event.id]
             content.threadIdentifier = event.repo
-            content.sound = .default
-            center.add(UNNotificationRequest(identifier: event.id, content: content, trigger: nil))
+            add(content, id: event.id, playsSound: playsSound)
         }
+    }
+
+    /// 설정 화면의 '테스트 알림 보내기'.
+    func postTest(playsSound: Bool) {
+        guard isAvailable else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "GitBell"
+        content.subtitle = L10n.string("Test notification")
+        content.body = L10n.string("Notifications are working. Click to open GitHub.")
+        content.userInfo = ["url": "https://github.com/notifications"]
+        add(content, id: "test-\(UUID())", playsSound: playsSound)
+    }
+
+    private func add(_ content: UNMutableNotificationContent, id: String, playsSound: Bool) {
+        content.sound = playsSound ? .default : nil
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,

@@ -26,6 +26,51 @@
 "Nothing matches these filters" = "조건에 맞는 활동이 없습니다";
 "Reset filters" = "필터 초기화";
 
+/* 우클릭 메뉴·새 버전 */
+"Open in browser" = "브라우저에서 열기";
+"Copy link" = "링크 복사";
+"Mark as unread" = "안 읽음으로 표시";
+"Show only %@" = "%@만 보기";
+"Hide %@" = "%@ 숨기기";
+"Hide this repository" = "이 저장소 숨기기";
+"GitBell %@ is available" = "GitBell %@ 새 버전이 나왔습니다";
+"Copy update command" = "업데이트 명령 복사";
+"Copied — paste it in Terminal" = "복사됨 — 터미널에 붙여넣으세요";
+"%@ available" = "%@ 나옴";
+
+/* 설정: 알림 */
+"Notifications" = "알림";
+"Notify me" = "알림 받기";
+"Play sound" = "소리 내기";
+"Notify about" = "알림 받을 활동";
+"New pull requests" = "새 PR";
+"When someone opens a pull request" = "누군가 PR을 올렸을 때";
+"Merged or closed" = "머지·닫힘";
+"When a pull request is merged or closed" = "PR이 머지되거나 닫혔을 때";
+"Approvals, change requests and review notes" = "승인, 수정 요청, 리뷰 의견";
+"Comments" = "댓글";
+"Comments on pull requests and issues" = "PR과 이슈에 달린 댓글";
+"Pushes, force pushes and new branches" = "push, 강제 push, 새 브랜치";
+"macOS notifications are allowed" = "macOS 알림이 허용되어 있습니다";
+"Notifications are turned off in macOS" = "macOS에서 알림이 꺼져 있습니다";
+"Open System Settings" = "시스템 설정 열기";
+"GitBell hasn't asked for permission yet" = "아직 알림 권한을 요청하지 않았습니다";
+"Allow" = "허용하기";
+"Send test" = "테스트 알림";
+"Test notification" = "테스트 알림";
+"Notifications are working. Click to open GitHub." = "알림이 잘 옵니다. 누르면 GitHub이 열립니다.";
+
+/* 설정: 목록 */
+"List" = "목록";
+"Hide bot activity" = "봇 활동 숨기기";
+"Accounts ending in [bot], like CI or review bots" = "CI·리뷰 봇처럼 이름이 [bot]으로 끝나는 계정";
+"Show unread count in menu bar" = "메뉴 막대에 안 읽은 수 표시";
+"Hidden repositories" = "숨긴 저장소";
+"Right-click an item to hide its repository." = "항목을 우클릭하면 그 저장소를 숨길 수 있습니다.";
+"Show" = "다시 보이기";
+"On" = "켜짐";
+"Off" = "꺼짐";
+
 /* 활동 종류 */
 "Opened" = "PR 올라옴";
 "Merged" = "머지됨";

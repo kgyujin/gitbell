@@ -28,6 +28,7 @@ struct PanelView: View {
                     Divider()
                     ActivityList()
                     Divider()
+                    if model.availableUpdate != nil { UpdateBanner() }
                     FooterView()
                 }
             }
@@ -52,8 +53,8 @@ private struct HeaderView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.tint)
             Text("GitBell").font(.system(size: 14, weight: .bold))
-            if model.state.unreadCount > 0 {
-                Text("\(model.state.unreadCount)")
+            if model.unreadCount > 0 {
+                Text("\(model.unreadCount)")
                     .font(.system(size: 11, weight: .bold))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 1)
@@ -65,7 +66,7 @@ private struct HeaderView: View {
                 model.showingSearch.toggle()
                 if !model.showingSearch { model.query.search = "" }
             }
-            if model.state.unreadCount > 0 {
+            if model.unreadCount > 0 {
                 IconButton(symbol: "checkmark.circle", help: "Mark all as read") { model.markRead() }
             }
             IconButton(symbol: "arrow.clockwise", help: "Refresh", spinning: model.isRefreshing) {
@@ -152,7 +153,8 @@ private struct RepositoryPicker: View {
         MenuChip(symbol: "folder", title: title, isActive: model.query.repo != nil) { open.toggle() }
             .popover(isPresented: $open, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 0) {
-                    OptionRow(title: L10n.string("All repositories"), detail: "\(model.state.history.count)",
+                    OptionRow(title: L10n.string("All repositories"),
+                              detail: "\(model.repositories.reduce(0) { $0 + $1.count })",
                               isSelected: model.query.repo == nil) {
                         model.query.repo = nil
                         open = false
@@ -166,6 +168,9 @@ private struct RepositoryPicker: View {
                                           isSelected: model.query.repo == summary.repo) {
                                     model.query.repo = summary.repo
                                     open = false
+                                }
+                                .contextMenu {
+                                    Button(L10n.string("Hide this repository")) { model.hideRepository(summary.repo) }
                                 }
                             }
                         }
@@ -269,11 +274,61 @@ private struct ActivityList: View {
             Section {
                 ForEach(section.events) { event in
                     EventRow(event: event, showsRepository: !groupedByRepo) { model.open(event) }
+                        .contextMenu { EventMenu(event: event) }
                 }
             } header: {
                 SectionHeader(section: section)
             }
         }
+    }
+}
+
+/// 항목 우클릭 메뉴.
+private struct EventMenu: View {
+    @EnvironmentObject private var model: AppModel
+    let event: ActivityEvent
+
+    var body: some View {
+        Button(L10n.string("Open in browser")) { model.open(event) }
+        Button(L10n.string("Copy link")) { model.copyLink(event) }
+        Divider()
+        if event.isUnread {
+            Button(L10n.string("Mark as read")) { model.markRead(event.id) }
+        } else {
+            Button(L10n.string("Mark as unread")) { model.markUnread(event.id) }
+        }
+        Button(String(format: L10n.string("Show only %@"), event.repoName)) { model.query.repo = event.repo }
+        Divider()
+        Button(String(format: L10n.string("Hide %@"), event.repoName)) { model.hideRepository(event.repo) }
+    }
+}
+
+/// 새 버전이 있을 때 목록 아래에 뜨는 안내. 누르면 업데이트 명령을 복사한다.
+private struct UpdateBanner: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var copied = false
+
+    var body: some View {
+        Button {
+            model.copyUpdateCommand()
+            copied = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down.circle.fill").foregroundStyle(.tint)
+                Text(String(format: L10n.string("GitBell %@ is available"), model.availableUpdate ?? ""))
+                    .fontWeight(.medium)
+                Spacer()
+                Text(copied ? L10n.string("Copied — paste it in Terminal")
+                            : L10n.string("Copy update command"))
+                    .foregroundStyle(.tint)
+            }
+            .font(.system(size: 11))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Color.accentColor.opacity(0.08))
+        }
+        .buttonStyle(.plain)
+        .help("npx gitbell@latest")
     }
 }
 

@@ -62,6 +62,26 @@ enum L10n {
         }
     }
 
+    static func groupLabel(_ group: NotificationGroup) -> String {
+        switch group {
+        case .newPullRequests: return string("New pull requests")
+        case .merges: return string("Merged or closed")
+        case .reviews: return string("Reviews")
+        case .comments: return string("Comments")
+        case .commits: return string("Commits")
+        }
+    }
+
+    static func groupDetail(_ group: NotificationGroup) -> String {
+        switch group {
+        case .newPullRequests: return string("When someone opens a pull request")
+        case .merges: return string("When a pull request is merged or closed")
+        case .reviews: return string("Approvals, change requests and review notes")
+        case .comments: return string("Comments on pull requests and issues")
+        case .commits: return string("Pushes, force pushes and new branches")
+        }
+    }
+
     static func sortLabel(_ sort: SortMode) -> String {
         switch sort {
         case .newest: return string("Newest")

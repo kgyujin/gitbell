@@ -35,11 +35,12 @@ That's it. The installer builds GitBell on your Mac, puts it in `~/Applications`
 ## Features
 
 - **Everything in one list.** Opened, merged and closed PRs, approvals, change requests, comments, pushes and new branches, across all your repositories.
-- **Native notifications.** Click one to jump straight to the pull request or commit.
+- **Notifications your way.** Native macOS banners with optional sound. Turn each type on or off: new PRs, merges, reviews, comments, commits. Click one to jump straight to it.
 - **Filter, sort and search.** Narrow by type (PRs, Reviews, Commits), by repository, or to unread only. Sort newest first, by repository, or unread first. Search by title, repository, person or `#number`.
 - **Unread at a glance.** Unread items get a dot, the bell shows a count, and you can mark a whole repository as read.
-- **Quiet by default.** Your own activity and bot deploy pushes are hidden, so the list shows what others did.
-- **Private.** Talks only to the GitHub API. Your token stays in the macOS Keychain.
+- **Quiet by default.** Your own activity and bot deploy pushes are hidden. Hide noisy repositories or all bot activity with a right-click or a switch.
+- **Right-click actions.** Open, copy link, mark as read or unread, show only that repository, or hide it.
+- **Private.** Talks to the GitHub API, plus npm twice a day to check for a new version. Your token stays in the macOS Keychain.
 - **English and Korean.** Follows your macOS language.
 
 ## How it works
@@ -74,7 +75,7 @@ GitBell reads repositories you own, collaborate on, or reach through an organiza
 <details>
 <summary><b>I don't see notification banners.</b></summary>
 
-Open **System Settings → Notifications → GitBell** and turn on **Allow notifications**. Also check that **Settings → Show notifications** is on in GitBell.
+In GitBell, open **Settings → Notifications** and press **Send test**. If nothing appears, open **System Settings → Notifications → GitBell**, turn on **Allow notifications**, and set the style to **Banners** or **Alerts**. Focus modes can also hide banners.
 </details>
 
 <details>

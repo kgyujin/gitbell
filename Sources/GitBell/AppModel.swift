@@ -1,10 +1,12 @@
 // 화면이 보는 앱 상태. 주기적으로 GitHub을 확인하고, 상태를 디스크에 저장하고, 알림을 보낸다.
 // 상태 파일: ~/Library/Application Support/GitBell/state.json (지워도 처음부터 다시 채울 뿐이다)
+// 설정: UserDefaults(io.github.kgyujin.gitbell). 스냅숏 모드에서는 설정을 쓰지 않는다.
 
 import AppKit
 import Foundation
 import GitBellCore
 import ServiceManagement
+import UserNotifications
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -25,25 +27,37 @@ final class AppModel: ObservableObject {
         }
     }
 
+    enum NotificationAuthorization {
+        case unknown, allowed, denied, notAsked
+    }
+
     @Published private(set) var state = WatchState()
     @Published private(set) var isRefreshing = false
     @Published private(set) var problem: Problem?
     @Published private(set) var tokenSource: TokenSource?
+    @Published private(set) var notificationAuthorization: NotificationAuthorization = .unknown
+    /// npm에 이 앱보다 새 버전이 있으면 그 버전.
+    @Published private(set) var availableUpdate: String?
+
     /// 목록 필터·검색·정렬. 검색어를 뺀 나머지는 다음에 열 때도 그대로 쓰도록 저장한다.
-    @Published var query = ActivityQuery() {
-        didSet { saveQuery() }
-    }
+    @Published var query = ActivityQuery() { didSet { saveQuery() } }
     @Published var showingSettings = false
     @Published var showingSearch = false
 
     @Published var refreshMinutes: Int {
-        didSet { defaults.set(refreshMinutes, forKey: Keys.refreshMinutes); restartLoop() }
+        didSet { save(refreshMinutes, Keys.refreshMinutes); restartLoop() }
     }
     @Published var includeOwnActivity: Bool {
-        didSet { defaults.set(includeOwnActivity, forKey: Keys.includeOwn) }
+        didSet { save(includeOwnActivity, Keys.includeOwn) }
     }
-    @Published var notificationsEnabled: Bool {
-        didSet { defaults.set(notificationsEnabled, forKey: Keys.notifications) }
+    @Published var notificationPrefs: NotificationPreferences {
+        didSet { saveJSON(notificationPrefs, Keys.notificationPrefs) }
+    }
+    @Published var display: DisplayPreferences {
+        didSet { saveJSON(display, Keys.display) }
+    }
+    @Published var showsCountInMenuBar: Bool {
+        didSet { save(showsCountInMenuBar, Keys.showsCount) }
     }
 
     private let defaults = UserDefaults.standard
@@ -52,7 +66,10 @@ final class AppModel: ObservableObject {
     private enum Keys {
         static let refreshMinutes = "refreshMinutes"
         static let includeOwn = "includeOwnActivity"
-        static let notifications = "notificationsEnabled"
+        static let legacyNotifications = "notificationsEnabled"
+        static let notificationPrefs = "notificationPreferences"
+        static let display = "displayPreferences"
+        static let showsCount = "showsCountInMenuBar"
         static let category = "filterCategory"
         static let repo = "filterRepository"
         static let unreadOnly = "filterUnreadOnly"
@@ -63,7 +80,15 @@ final class AppModel: ObservableObject {
         let storedMinutes = defaults.integer(forKey: Keys.refreshMinutes)
         refreshMinutes = storedMinutes > 0 ? storedMinutes : 2
         includeOwnActivity = defaults.bool(forKey: Keys.includeOwn)
-        notificationsEnabled = defaults.object(forKey: Keys.notifications) as? Bool ?? true
+        showsCountInMenuBar = defaults.object(forKey: Keys.showsCount) as? Bool ?? true
+        display = Self.loadJSON(DisplayPreferences.self, Keys.display) ?? DisplayPreferences()
+        var prefs = Self.loadJSON(NotificationPreferences.self, Keys.notificationPrefs) ?? NotificationPreferences()
+        // 0.2.0까지의 켜기·끄기 하나짜리 설정을 이어받는다.
+        if defaults.object(forKey: Keys.notificationPrefs) == nil,
+           let legacy = defaults.object(forKey: Keys.legacyNotifications) as? Bool {
+            prefs.isEnabled = legacy
+        }
+        notificationPrefs = prefs
         query = ActivityQuery(
             category: defaults.string(forKey: Keys.category).flatMap(EventCategory.init(rawValue:)),
             repo: defaults.string(forKey: Keys.repo),
@@ -71,20 +96,14 @@ final class AppModel: ObservableObject {
             sort: defaults.string(forKey: Keys.sort).flatMap(SortMode.init(rawValue:)) ?? .newest)
     }
 
-    private func saveQuery() {
-        // 스냅숏은 같은 앱 설정을 쓰므로, 그림용으로 바꾼 필터가 사용자 설정에 남지 않게 한다.
-        guard !SnapshotMode.isOn else { return }
-        defaults.set(query.category?.rawValue, forKey: Keys.category)
-        defaults.set(query.repo, forKey: Keys.repo)
-        defaults.set(query.unreadOnly, forKey: Keys.unreadOnly)
-        defaults.set(query.sort.rawValue, forKey: Keys.sort)
-    }
-
     // MARK: 스냅숏용 (GitHub에 요청하지 않는다)
 
     func loadDemo() {
         state = DemoData.state()
         tokenSource = .githubCLI
+        notificationAuthorization = .allowed
+        display = DisplayPreferences()
+        notificationPrefs = NotificationPreferences()
     }
 
     func loadSavedStateOnly() {
@@ -98,19 +117,28 @@ final class AppModel: ObservableObject {
         problem = .noToken
     }
 
+    func simulateUpdate(_ version: String) { availableUpdate = version }
+
     // MARK: 확인 주기
 
     func start() {
         state = Self.loadState()
         restartLoop()
+        refreshNotificationAuthorization()
+        Task { await checkForUpdate() }
     }
 
     private func restartLoop() {
+        guard !SnapshotMode.isOn else { return }
         loopTask?.cancel()
         let minutes = refreshMinutes
         loopTask = Task { [weak self] in
+            var checks = 0
             while !Task.isCancelled {
                 await self?.refresh()
+                checks += 1
+                // 새 버전 확인은 하루에 몇 번이면 충분하다(12시간마다).
+                if checks % max(1, 720 / minutes) == 0 { await self?.checkForUpdate() }
                 try? await Task.sleep(nanoseconds: UInt64(minutes) * 60 * 1_000_000_000)
             }
         }
@@ -134,7 +162,8 @@ final class AppModel: ObservableObject {
             state = result.state
             saveState()
             problem = result.failedRepos.isEmpty ? nil : .partial(result.failedRepos)
-            if notificationsEnabled { Notifier.shared.post(result.newEvents) }
+            let toNotify = eventsToNotify(result.newEvents, notifications: notificationPrefs, display: display)
+            Notifier.shared.post(toNotify, playsSound: notificationPrefs.playsSound)
         } catch GitHubError.unauthorized {
             problem = .unauthorized
         } catch let GitHubError.http(status, message) {
@@ -146,23 +175,23 @@ final class AppModel: ObservableObject {
         }
     }
 
-    // MARK: 항목
+    // MARK: 목록
 
-    var sections: [ActivitySection] { query.sections(state.history) }
+    /// 숨긴 저장소·봇을 뺀 항목.
+    private var visibleHistory: [ActivityEvent] { display.visible(state.history) }
 
-    var repositories: [RepositorySummary] { RepositorySummary.from(state.history) }
+    var unreadCount: Int { state.unreadCount(visibleTo: display) }
 
-    var visibleCount: Int { query.filter(state.history).count }
+    var sections: [ActivitySection] { query.sections(visibleHistory) }
+
+    var repositories: [RepositorySummary] { RepositorySummary.from(visibleHistory) }
+
+    var visibleCount: Int { query.filter(visibleHistory).count }
 
     /// 검색어와 필터를 지운다. 정렬 방식은 사용자가 고른 대로 둔다.
     func resetFilters() {
         query = ActivityQuery(sort: query.sort)
         showingSearch = false
-    }
-
-    func markRead(repo: String) {
-        state.markRead(repo: repo)
-        saveState()
     }
 
     func open(_ event: ActivityEvent) {
@@ -171,8 +200,92 @@ final class AppModel: ObservableObject {
     }
 
     func markRead(_ id: String? = nil) {
-        state.markRead(id)
+        if id == nil {
+            // '모두 읽음'은 보이는 항목에만 적용한다. 숨긴 저장소는 숨긴 상태 그대로 둔다.
+            for event in visibleHistory where event.isUnread { state.markRead(event.id) }
+        } else {
+            state.markRead(id)
+        }
         saveState()
+    }
+
+    func markRead(repo: String) {
+        state.markRead(repo: repo)
+        saveState()
+    }
+
+    func markUnread(_ id: String) {
+        state.markUnread(id)
+        saveState()
+    }
+
+    func copyLink(_ event: ActivityEvent) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(event.url.absoluteString, forType: .string)
+    }
+
+    func hideRepository(_ repo: String) {
+        display.hiddenRepositories.insert(repo)
+        if query.repo == repo { query.repo = nil }
+    }
+
+    func showRepository(_ repo: String) {
+        display.hiddenRepositories.remove(repo)
+    }
+
+    // MARK: 알림
+
+    func refreshNotificationAuthorization() {
+        guard Bundle.main.bundleIdentifier != nil, !SnapshotMode.isOn else { return }
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let status: NotificationAuthorization
+            switch settings.authorizationStatus {
+            case .authorized, .provisional: status = .allowed
+            case .denied: status = .denied
+            case .notDetermined: status = .notAsked
+            default: status = .unknown
+            }
+            Task { @MainActor in self.notificationAuthorization = status }
+        }
+    }
+
+    func requestNotificationPermission() {
+        Notifier.shared.requestAuthorization { [weak self] in
+            Task { @MainActor in self?.refreshNotificationAuthorization() }
+        }
+    }
+
+    func openNotificationSettings() {
+        let id = Bundle.main.bundleIdentifier ?? "io.github.kgyujin.gitbell"
+        let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)")!
+        NSWorkspace.shared.open(url)
+    }
+
+    func sendTestNotification() {
+        Notifier.shared.postTest(playsSound: notificationPrefs.playsSound)
+    }
+
+    func setGroup(_ group: NotificationGroup, enabled: Bool) {
+        if enabled { notificationPrefs.groups.insert(group) } else { notificationPrefs.groups.remove(group) }
+    }
+
+    // MARK: 새 버전
+
+    func checkForUpdate() async {
+        guard !SnapshotMode.isOn,
+              let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+              let url = URL(string: "https://registry.npmjs.org/gitbell/latest") else { return }
+        var request = URLRequest(url: url, timeoutInterval: 10)
+        request.setValue("GitBell", forHTTPHeaderField: "User-Agent")
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let latest = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["version"] as? String
+        else { return }
+        availableUpdate = SemanticVersion.isNewer(latest, than: current) ? latest : nil
+    }
+
+    func copyUpdateCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("npx gitbell@latest", forType: .string)
     }
 
     // MARK: 계정
@@ -206,6 +319,30 @@ final class AppModel: ObservableObject {
 
     // MARK: 저장
 
+    private func saveQuery() {
+        guard !SnapshotMode.isOn else { return }
+        defaults.set(query.category?.rawValue, forKey: Keys.category)
+        defaults.set(query.repo, forKey: Keys.repo)
+        defaults.set(query.unreadOnly, forKey: Keys.unreadOnly)
+        defaults.set(query.sort.rawValue, forKey: Keys.sort)
+    }
+
+    /// 스냅숏은 같은 앱 설정을 쓰므로, 그림용으로 바꾼 값이 사용자 설정에 남지 않게 한다.
+    private func save(_ value: Any, _ key: String) {
+        guard !SnapshotMode.isOn else { return }
+        defaults.set(value, forKey: key)
+    }
+
+    private func saveJSON<T: Encodable>(_ value: T, _ key: String) {
+        guard !SnapshotMode.isOn, let data = try? JSONEncoder().encode(value) else { return }
+        defaults.set(data, forKey: key)
+    }
+
+    private static func loadJSON<T: Decodable>(_ type: T.Type, _ key: String) -> T? {
+        guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
+        return try? JSONDecoder().decode(T.self, from: data)
+    }
+
     private static var stateURL: URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("GitBell", isDirectory: true).appendingPathComponent("state.json")
@@ -220,6 +357,7 @@ final class AppModel: ObservableObject {
     }
 
     private func saveState() {
+        guard !SnapshotMode.isOn else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(state) else { return }

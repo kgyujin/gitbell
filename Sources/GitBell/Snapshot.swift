@@ -39,6 +39,7 @@ enum SnapshotRenderer {
         if args.contains("--by-repo") { model.query.sort = .byRepository }
         if args.contains("--unread-first") { model.query.sort = .unreadFirst }
         if args.contains("--settings") { model.showingSettings = true }
+        if args.contains("--update") { model.simulateUpdate("9.9.9") }
         if args.contains("--onboarding") { model.simulateNoToken() }
 
         let view = PanelView()

@@ -14,7 +14,8 @@ struct GitBellApp: App {
             PanelView()
                 .environmentObject(model)
         } label: {
-            MenuBarLabel(unread: model.state.unreadCount, hasProblem: model.problem?.isBlocking == true)
+            MenuBarLabel(unread: model.unreadCount, showsCount: model.showsCountInMenuBar,
+                         hasProblem: model.problem?.isBlocking == true)
         }
         .menuBarExtraStyle(.window)
     }
@@ -22,11 +23,14 @@ struct GitBellApp: App {
 
 struct MenuBarLabel: View {
     let unread: Int
+    let showsCount: Bool
     let hasProblem: Bool
 
     var body: some View {
         if hasProblem {
             Image(systemName: "bell.slash")
+        } else if unread > 0 && !showsCount {
+            Image(systemName: "bell.badge.fill")
         } else if unread > 0 {
             HStack(spacing: 2) {
                 Image(systemName: "bell.badge.fill")
