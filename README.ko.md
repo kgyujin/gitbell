@@ -6,6 +6,7 @@
 
 _GitHub 활동을 Mac 메뉴 막대에서 바로 봅니다._
 
+[![npm](https://img.shields.io/npm/v/gitbell?logo=npm)](https://www.npmjs.com/package/gitbell)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](#필요한-것)
 [![Swift](https://img.shields.io/badge/Swift-5.10%2B-F05138?logo=swift&logoColor=white)](Package.swift)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
