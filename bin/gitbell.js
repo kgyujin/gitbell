@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 // GitBell 설치기. `npx gitbell` 또는 `npx github:kgyujin/gitbell`로 실행한다.
 //
-// 하는 일: 소스를 임시 폴더로 복사 → 이 Mac에서 Swift로 빌드 → ~/Applications/GitBell.app에 설치 → 실행.
-// 내 Mac에서 빌드한 앱이라 "확인되지 않은 개발자" 경고가 뜨지 않는다.
-// 필요한 것: macOS 13 이상, Xcode 명령줄 도구(xcode-select --install).
+// macOS: 소스를 임시 폴더로 복사 → 이 Mac에서 Swift로 빌드 → ~/Applications/GitBell.app에 설치 → 실행.
+//        내 Mac에서 빌드한 앱이라 "확인되지 않은 개발자" 경고가 뜨지 않는다.
+//        필요한 것: macOS 13 이상, Xcode 명령줄 도구(xcode-select --install).
+// Windows: windows/ 폴더의 Electron 앱을 %LOCALAPPDATA%\Programs\GitBell에 복사 → Electron 받기
+//        → 시작 메뉴 바로가기 만들기 → 실행. 필요한 것: Windows 10 이상, Node.js 22.12 이상.
 'use strict';
 
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -20,10 +22,18 @@ const VERSION = require(path.join(PACKAGE_ROOT, 'package.json')).version;
 // 안내에 쓰는 실행 명령. npm 패키지 이름과 같다.
 const RUN = 'npx gitbell';
 
+// Windows판 위치. 설정·기록은 Electron이 정하는 %APPDATA%\GitBell에 있다.
+const WIN_INSTALL_DIR = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs', 'GitBell');
+const WIN_APP_DIR = path.join(WIN_INSTALL_DIR, 'windows');
+const WIN_DATA_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'GitBell');
+// windows/ 안에서 설치할 것. 개발용 node_modules·테스트는 빼고, 한국어 문구는 macOS판 파일을 함께 쓴다.
+const WIN_APP_ENTRIES = ['package.json', 'package-lock.json', 'src', 'assets'];
+
 /** 설치기 문구 언어. 터미널 LANG이 영어여도 macOS 첫 번째 언어가 한국어면 한국어로 보인다. */
 function detectKorean() {
   if (/^ko/i.test(process.env.GITBELL_LANG || '')) return true;
   if (/^en/i.test(process.env.GITBELL_LANG || '')) return false;
+  if (process.platform !== 'darwin') return /^ko/i.test(Intl.DateTimeFormat().resolvedOptions().locale);
   const languages = spawnSync('defaults', ['read', '-g', 'AppleLanguages'], { encoding: 'utf8' }).stdout || '';
   const first = (languages.match(/"?([a-zA-Z-]+)"?/g) || []).map((s) => s.replace(/"/g, '')).find((s) => /^[a-z]{2}/.test(s));
   if (first) return first.startsWith('ko');
@@ -55,9 +65,6 @@ function run(command, args, options = {}) {
 
 /** macOS 13(Darwin 22) 이상인지 확인한다. */
 function checkPlatform() {
-  if (process.platform !== 'darwin') {
-    fail(t('GitBell runs on macOS only.', 'GitBell은 macOS에서만 동작합니다.'));
-  }
   const darwinMajor = Number(os.release().split('.')[0]);
   if (darwinMajor < 22) {
     fail(t('GitBell needs macOS 13 Ventura or later.', 'GitBell은 macOS 13 Ventura 이상이 필요합니다.'));
@@ -153,6 +160,103 @@ function uninstall(purge) {
   }
 }
 
+// MARK: - Windows
+
+/** Windows 10 이상, Electron이 요구하는 Node.js 22.12 이상인지 확인한다. */
+function checkWindows() {
+  if (Number(os.release().split('.')[0]) < 10) {
+    fail(t('GitBell needs Windows 10 or later.', 'GitBell은 Windows 10 이상이 필요합니다.'));
+  }
+  const [major, minor] = process.versions.node.split('.').map(Number);
+  if (major < 22 || (major === 22 && minor < 12)) {
+    fail(t(`Node.js ${process.versions.node} is too old. GitBell for Windows needs Node.js 22.12 or later.`,
+      `Node.js ${process.versions.node}는 너무 오래됐습니다. Windows판 GitBell은 Node.js 22.12 이상이 필요합니다.`),
+    t('Install the current LTS from https://nodejs.org, then run this again.', 'https://nodejs.org 에서 최신 LTS를 설치한 뒤 다시 실행하세요.'));
+  }
+}
+
+/** 설치된 Electron 실행 파일. 없으면 null. */
+function windowsElectron() {
+  const dir = path.join(WIN_APP_DIR, 'node_modules', 'electron');
+  try {
+    const exe = path.join(dir, 'dist', fs.readFileSync(path.join(dir, 'path.txt'), 'utf8').trim());
+    return fs.existsSync(exe) ? exe : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 설치된 GitBell에 명령(--quit, --uninstall, --create-shortcut)을 보낸다. */
+function runWindowsApp(flag) {
+  const exe = windowsElectron();
+  return exe ? run(exe, [WIN_APP_DIR, flag], { timeout: 30000, windowsHide: true }) : null;
+}
+
+/** 실패한 명령의 출력(실행조차 못 했으면 그 이유). */
+function output(result) {
+  return dim(`${result.stdout || ''}\n${result.stderr || ''}`.trim() || String(result.error || ''));
+}
+
+/** 실행 중이던 앱이 막 끝나 파일이 잠겨 있을 수 있어 몇 번 다시 시도한다. */
+function removeDir(dir) {
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+}
+
+function installWindows() {
+  console.log(`\n${bold('GitBell')} ${dim('v' + VERSION)}  ${dim(t('GitHub activity in your system tray', '작업 표시줄 트레이에서 보는 GitHub 활동'))}\n`);
+  checkWindows();
+
+  step(t(`Installing to ${WIN_INSTALL_DIR}`, `${WIN_INSTALL_DIR}에 설치하는 중`));
+  runWindowsApp('--quit');
+  removeDir(WIN_INSTALL_DIR);
+  for (const entry of WIN_APP_ENTRIES) {
+    fs.cpSync(path.join(PACKAGE_ROOT, 'windows', entry), path.join(WIN_APP_DIR, entry), { recursive: true });
+  }
+  const strings = path.join('Resources', 'ko.lproj');
+  fs.cpSync(path.join(PACKAGE_ROOT, strings), path.join(WIN_INSTALL_DIR, strings), { recursive: true });
+
+  step(t('Downloading Electron (about 100 MB the first time)…', 'Electron을 받는 중 (처음엔 약 100MB)…'));
+  // Windows에서 npm은 npm.cmd라 셸로 실행한다. 인자는 고정값이다.
+  const npm = run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: WIN_APP_DIR, shell: true });
+  if (npm.status !== 0) fail(t('Could not install Electron.', 'Electron을 설치하지 못했습니다.'), output(npm));
+  const download = run(process.execPath, [path.join(WIN_APP_DIR, 'node_modules', 'electron', 'install.js')], { cwd: WIN_APP_DIR });
+  const exe = windowsElectron();
+  if (download.status !== 0 || !exe) {
+    fail(t('Could not download Electron.', 'Electron을 받지 못했습니다.'), output(download));
+  }
+
+  // 시작 메뉴 바로가기가 있어야 알림에 GitBell 이름과 아이콘이 보인다.
+  runWindowsApp('--create-shortcut');
+
+  step(t('Launching GitBell', 'GitBell 실행'));
+  spawn(exe, [WIN_APP_DIR], { detached: true, stdio: 'ignore' }).unref();
+
+  const ghReady = run('gh', ['auth', 'status'], { windowsHide: true }).status === 0;
+  console.log(`\n${green('✔')} ${bold(t('Done! Click the bell in the system tray (next to the clock).', '설치 완료! 작업 표시줄 시계 옆 트레이의 종 아이콘을 누르세요.'))}`);
+  console.log(dim(t('  If you don\'t see it, open the ^ overflow menu and drag the bell onto the taskbar.',
+    '  보이지 않으면 ^(숨겨진 아이콘)을 열고 종 아이콘을 작업 표시줄로 끌어다 놓으세요.')));
+  if (ghReady) {
+    console.log(dim(t('  Signed in through GitHub CLI. Nothing else to set up.', '  GitHub CLI 로그인을 그대로 씁니다. 따로 설정할 것이 없습니다.')));
+  } else {
+    console.log(dim(t('  Connect GitHub in the app: run `gh auth login`, or paste a personal access token.',
+      '  앱에서 GitHub을 연결하세요: `gh auth login`을 실행하거나 개인 액세스 토큰을 붙여넣습니다.')));
+  }
+  console.log(dim(t(`  Uninstall anytime: ${RUN} uninstall`, `  지우려면: ${RUN} uninstall`)) + '\n');
+}
+
+function uninstallWindows(purge) {
+  // 실행 중인 앱을 끝내고 로그인 시 실행·시작 메뉴 바로가기를 지운다.
+  runWindowsApp('--uninstall');
+  removeDir(WIN_INSTALL_DIR);
+  step(t(`Removed ${WIN_INSTALL_DIR}`, `${WIN_INSTALL_DIR}을 지웠습니다`));
+  if (purge) {
+    removeDir(WIN_DATA_DIR);
+    step(t('Removed saved data, settings and the saved token', '저장된 기록, 설정, 저장한 토큰을 지웠습니다'));
+  } else {
+    console.log(dim(t('  Kept your settings. Add --purge to remove them too.', '  설정은 남겨 두었습니다. 함께 지우려면 --purge를 붙이세요.')));
+  }
+}
+
 function help() {
   console.log(`
 ${bold('GitBell')} ${dim('v' + VERSION)}
@@ -167,12 +271,16 @@ ${[
 
 function main(argv) {
   const [command = 'install', ...rest] = argv;
+  const isWindows = process.platform === 'win32';
+  if ((command === 'install' || command === 'update' || command === 'uninstall') && !isWindows && process.platform !== 'darwin') {
+    fail(t('GitBell runs on macOS and Windows.', 'GitBell은 macOS와 Windows에서 동작합니다.'));
+  }
   switch (command) {
     case 'install':
     case 'update':
-      return install();
+      return isWindows ? installWindows() : install();
     case 'uninstall':
-      return uninstall(rest.includes('--purge'));
+      return isWindows ? uninstallWindows(rest.includes('--purge')) : uninstall(rest.includes('--purge'));
     case '-v':
     case '--version':
       return console.log(VERSION);
@@ -190,4 +298,4 @@ if (require.main === module) {
   main(process.argv.slice(2));
 }
 
-module.exports = { main };
+module.exports = { main, WIN_INSTALL_DIR, WIN_APP_DIR, WIN_DATA_DIR, WIN_APP_ENTRIES };

@@ -1,0 +1,104 @@
+# GitBell 테스트.
+# - windows: Windows판 단위·E2E 테스트, 그리고 `npx gitbell`과 같은 설치기로 실제 설치 → 실행 → 제거까지 확인
+# - linux:   Windows판 테스트를 Linux(xvfb)에서도 돌려 플랫폼에 기대지 않는 부분을 확인
+# - macos:   macOS판 Swift 테스트와 앱 빌드
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: windows
+        run: npm ci
+      - name: Unit tests
+        working-directory: windows
+        run: npm test
+      - name: E2E tests (Electron)
+        working-directory: windows
+        run: npm run test:e2e
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-screenshots
+          path: windows/test-results
+          if-no-files-found: ignore
+
+      - name: Install with the installer (npx gitbell)
+        run: node bin/gitbell.js
+      - name: Check the installed app
+        run: |
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\GitBell'
+          $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\GitBell.lnk'
+          foreach ($path in @("$app\windows\src\main.js", "$app\Resources\ko.lproj\Localizable.strings", "$app\windows\node_modules\electron\dist\electron.exe", $shortcut)) {
+            if (-not (Test-Path $path)) { throw "missing: $path" }
+          }
+          $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+          Write-Output "shortcut -> $($link.TargetPath) $($link.Arguments)"
+          if ($link.TargetPath -notlike "$app*electron.exe") { throw "shortcut target is wrong" }
+          Start-Sleep -Seconds 5
+          $running = Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" | Where-Object { $_.ExecutablePath -like "$app*" }
+          if (-not $running) { throw 'GitBell is not running' }
+          Write-Output "running: $($running.Count) processes"
+      - name: Install again (update while running)
+        run: node bin/gitbell.js
+      - name: Uninstall
+        run: node bin/gitbell.js uninstall --purge
+      - name: Check it is gone
+        run: |
+          Start-Sleep -Seconds 3
+          $app = Join-Path $env:LOCALAPPDATA 'Programs\GitBell'
+          $shortcut = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\GitBell.lnk'
+          foreach ($path in @($app, $shortcut, (Join-Path $env:APPDATA 'GitBell'))) {
+            if (Test-Path $path) { throw "still there: $path" }
+          }
+          $running = Get-CimInstance Win32_Process -Filter "Name = 'electron.exe'" | Where-Object { $_.ExecutablePath -like "$app*" }
+          if ($running) { throw 'GitBell is still running' }
+
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install
+        working-directory: windows
+        run: npm ci
+      - name: Unit tests
+        working-directory: windows
+        run: npm test
+      - name: E2E tests (Electron under xvfb)
+        working-directory: windows
+        run: |
+          # Ubuntu 24.04는 비특권 사용자 이름공간을 막아 Electron(Chromium) 샌드박스가 뜨지 않는다.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          xvfb-run -a -s "-screen 0 1920x1080x24" npm run test:e2e
+
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift tests
+        run: swift test
+      - name: Build the app
+        run: scripts/build-app.sh
