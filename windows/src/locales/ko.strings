@@ -1,0 +1,22 @@
+/* GitBell Windows판에만 있는 한국어 문구. 키는 영어 원문이다. */
+/* 나머지 문구는 macOS판과 같은 Resources/ko.lproj/Localizable.strings를 쓴다. */
+
+/* 단축키 */
+"Search (Ctrl+F)" = "검색 (Ctrl+F)";
+"Refresh (Ctrl+R)" = "새로고침 (Ctrl+R)";
+"Settings (Ctrl+,)" = "설정 (Ctrl+,)";
+
+/* 트레이 */
+"%lld unread" = "안 읽음 %lld개";
+"Open GitBell" = "GitBell 열기";
+"Show unread count on the tray icon" = "트레이 아이콘에 안 읽은 수 표시";
+
+/* 알림 */
+"Banner style follows Windows settings" = "배너 모양은 Windows 설정을 따릅니다";
+"Open Windows settings" = "Windows 설정 열기";
+
+/* 연결 */
+"Run this in a terminal, then check again." = "터미널에서 아래 명령을 실행한 뒤 '다시 확인'을 누르세요.";
+"Your token is encrypted for your Windows account and stored only on this PC." = "토큰은 내 Windows 계정으로 암호화되어 이 PC에만 저장됩니다.";
+"Couldn't save the token. Try again." = "토큰을 저장하지 못했습니다. 다시 시도하세요.";
+"Copied — paste it in a terminal" = "복사됨 — 터미널에 붙여넣으세요";

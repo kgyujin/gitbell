@@ -1,0 +1,21 @@
+{
+  "name": "gitbell-windows",
+  "productName": "GitBell",
+  "version": "0.4.0",
+  "private": true,
+  "description": "GitBell for Windows: GitHub activity in the system tray.",
+  "main": "src/main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "demo": "electron . --demo --show",
+    "test": "node --test test/unit/*.test.js",
+    "test:e2e": "node --test --test-concurrency=1 test/e2e/*.test.js"
+  },
+  "dependencies": {
+    "electron": "44.9.3"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

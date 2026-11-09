@@ -4,10 +4,11 @@
 
 # GitBell
 
-_GitHub 활동을 Mac 메뉴 막대에서 바로 봅니다._
+_GitHub 활동을 Mac 메뉴 막대나 Windows 트레이에서 바로 봅니다._
 
 [![npm](https://img.shields.io/npm/v/gitbell?logo=npm)](https://www.npmjs.com/package/gitbell)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](#설치)
+[![Windows 10+](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows)](#windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [설치](#설치) · [기능](#기능) · [사용 팁](#사용-팁) · [자주 묻는 질문](#자주-묻는-질문) · [English](README.md)
@@ -29,6 +30,19 @@ npx gitbell
 > [!NOTE]
 > macOS 13 이상, Node.js 18 이상, Xcode 명령줄 도구(`xcode-select --install`)가 필요합니다. 내 Mac에서 직접 빌드한 앱이라 "확인되지 않은 개발자" 경고 없이 열립니다.
 
+### Windows
+
+PowerShell이나 명령 프롬프트에서 같은 명령을 실행합니다.
+
+```powershell
+npx gitbell
+```
+
+`%LOCALAPPDATA%\Programs\GitBell`에 설치하고 시작 메뉴에 바로가기를 만든 뒤 실행합니다. 작업 표시줄 시계 옆 트레이의 종 아이콘을 누르세요. 보이지 않으면 **^**(숨겨진 아이콘)을 열고 종 아이콘을 작업 표시줄로 끌어다 놓으세요.
+
+> [!NOTE]
+> Windows 10 이상과 Node.js 22.12 이상이 필요합니다. 처음 설치할 때 Electron(약 100MB)을 받습니다. 토큰은 내 Windows 계정으로 암호화해 이 PC에만 저장하고, 설정과 기록은 `%APPDATA%\GitBell`에 둡니다.
+
 **GitHub 연결.** [GitHub CLI](https://cli.github.com)를 쓰고 있다면 따로 할 일이 없습니다. 쓰지 않는다면 `repo`, `notifications`, `read:org` 권한을 준 [개인 액세스 토큰](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell)을 앱에 붙여넣으세요.
 
 ## 기능
@@ -44,9 +58,9 @@ npx gitbell
 
 | 하고 싶은 것 | 방법 |
 | --- | --- |
-| 검색 | <kbd>⌘</kbd> <kbd>F</kbd> |
-| 지금 새로고침 | <kbd>⌘</kbd> <kbd>R</kbd> |
-| 설정 열기 | <kbd>⌘</kbd> <kbd>,</kbd> |
+| 검색 | <kbd>⌘</kbd> <kbd>F</kbd> (Windows: <kbd>Ctrl</kbd> <kbd>F</kbd>) |
+| 지금 새로고침 | <kbd>⌘</kbd> <kbd>R</kbd> (Windows: <kbd>Ctrl</kbd> <kbd>R</kbd>) |
+| 설정 열기 | <kbd>⌘</kbd> <kbd>,</kbd> (Windows: <kbd>Ctrl</kbd> <kbd>,</kbd>) |
 | 링크 복사, 안 읽음 표시, 저장소 숨기기 | 항목을 우클릭 |
 | 저장소 하나를 통째로 읽음 표시 | **저장소별**로 정렬한 뒤 저장소 제목 옆 **읽음 표시** |
 
@@ -72,6 +86,8 @@ SAML SSO를 쓰는 조직이라면 토큰을 그 조직에 승인해야 합니�
 <summary><b>알림 배너가 안 떠요.</b></summary>
 
 GitBell의 **설정 → 알림**에서 **테스트 알림**을 눌러 보세요. 아무것도 뜨지 않으면 **시스템 설정 → 알림 → GitBell**에서 알림을 허용하고 스타일을 **배너**나 **알림**으로 바꾸세요. 집중 모드가 켜져 있을 때도 배너가 가려집니다.
+
+Windows에서는 **설정 → 알림 → Windows 설정 열기**에서 GitBell 알림이 켜져 있는지 확인하세요. 방해 금지(집중 지원)가 켜져 있으면 배너가 뜨지 않습니다.
 </details>
 
 <details>
@@ -80,5 +96,14 @@ GitBell의 **설정 → 알림**에서 **테스트 알림**을 눌러 보세요.
 ```bash
 git clone https://github.com/kgyujin/gitbell && cd gitbell
 swift test && scripts/build-app.sh   # dist/GitBell.app 생성
+```
+
+Windows판은 `windows/` 폴더의 Electron 앱입니다.
+
+```bash
+cd windows && npm install
+npm test            # 단위 테스트
+npm run test:e2e    # 앱을 띄워 확인하는 테스트
+npm run demo        # 가상 자료로 패널 열기
 ```
 </details>

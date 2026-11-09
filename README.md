@@ -4,10 +4,11 @@
 
 # GitBell
 
-_Your GitHub activity, one click away in the Mac menu bar._
+_Your GitHub activity, one click away in the Mac menu bar or the Windows system tray._
 
 [![npm](https://img.shields.io/npm/v/gitbell?logo=npm)](https://www.npmjs.com/package/gitbell)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](#install)
+[![Windows 10+](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows)](#windows)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [Install](#install) · [Features](#features) · [Tips](#tips) · [FAQ](#faq) · [한국어](README.ko.md)
@@ -29,6 +30,19 @@ GitBell builds on your Mac, installs to `~/Applications`, and starts. Click the 
 > [!NOTE]
 > Needs macOS 13 or later, Node.js 18+, and the Xcode command line tools (`xcode-select --install`). Because the app is built on your own Mac, macOS opens it without the "unidentified developer" warning.
 
+### Windows
+
+Run the same command in PowerShell or Command Prompt.
+
+```powershell
+npx gitbell
+```
+
+GitBell installs to `%LOCALAPPDATA%\Programs\GitBell`, adds a Start menu shortcut, and starts. Click the bell in the system tray next to the clock. If you don't see it, open the **^** overflow menu and drag the bell onto the taskbar.
+
+> [!NOTE]
+> Needs Windows 10 or later and Node.js 22.12+. The first install downloads Electron (about 100 MB). Your token is encrypted for your Windows account and stays on this PC; settings and history live in `%APPDATA%\GitBell`.
+
 **Connect GitHub.** If you use [GitHub CLI](https://cli.github.com), there's nothing to do. Otherwise, paste a [personal access token](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell) with `repo`, `notifications` and `read:org` into the app.
 
 ## Features
@@ -44,9 +58,9 @@ GitBell builds on your Mac, installs to `~/Applications`, and starts. Click the 
 
 | Do this | How |
 | --- | --- |
-| Search | <kbd>⌘</kbd> <kbd>F</kbd> |
-| Refresh now | <kbd>⌘</kbd> <kbd>R</kbd> |
-| Open settings | <kbd>⌘</kbd> <kbd>,</kbd> |
+| Search | <kbd>⌘</kbd> <kbd>F</kbd> (Windows: <kbd>Ctrl</kbd> <kbd>F</kbd>) |
+| Refresh now | <kbd>⌘</kbd> <kbd>R</kbd> (Windows: <kbd>Ctrl</kbd> <kbd>R</kbd>) |
+| Open settings | <kbd>⌘</kbd> <kbd>,</kbd> (Windows: <kbd>Ctrl</kbd> <kbd>,</kbd>) |
 | Copy link, mark unread, hide a repository | Right-click an item |
 | Mark a whole repository as read | Sort **By repository**, then **Mark as read** on its header |
 
@@ -72,6 +86,8 @@ For organizations that use SAML single sign-on, authorize your token for the org
 <summary><b>I don't see notification banners.</b></summary>
 
 Open **Settings → Notifications** in GitBell and press **Send test**. If nothing appears, open **System Settings → Notifications → GitBell**, allow notifications, and choose **Banners** or **Alerts**. Focus modes also hide banners.
+
+On Windows, use **Settings → Notifications → Open Windows settings** and check that GitBell notifications are on. Do not disturb (Focus assist) also hides banners.
 </details>
 
 <details>
@@ -80,5 +96,14 @@ Open **Settings → Notifications** in GitBell and press **Send test**. If nothi
 ```bash
 git clone https://github.com/kgyujin/gitbell && cd gitbell
 swift test && scripts/build-app.sh   # creates dist/GitBell.app
+```
+
+The Windows version is the Electron app in `windows/`.
+
+```bash
+cd windows && npm install
+npm test            # unit tests
+npm run test:e2e    # tests that launch the app
+npm run demo        # open the panel with sample data
 ```
 </details>
