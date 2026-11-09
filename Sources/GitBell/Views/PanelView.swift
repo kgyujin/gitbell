@@ -35,6 +35,11 @@ struct PanelView: View {
         }
         .frame(width: 420)
         .panelBackground()
+        // 패널을 열 때마다 알림 권한을 다시 읽는다(시스템 설정에서 바꾼 값이 바로 보이게).
+        .onAppear { model.refreshNotificationAuthorization() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            model.refreshNotificationAuthorization()
+        }
     }
 
     private var showsOnboarding: Bool {

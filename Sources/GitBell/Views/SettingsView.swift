@@ -109,6 +109,11 @@ private struct PermissionRow: View {
         }
         .font(.system(size: 11))
         .padding(.vertical, 8)
+        // 시스템 설정에서 알림을 켜고 돌아오면 2초 안에 이 줄이 바뀐다.
+        .onAppear { model.refreshNotificationAuthorization() }
+        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
+            model.refreshNotificationAuthorization()
+        }
     }
 }
 

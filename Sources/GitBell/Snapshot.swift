@@ -9,6 +9,7 @@
 import AppKit
 import GitBellCore
 import SwiftUI
+import UserNotifications
 
 enum SnapshotMode {
     static let isOn = CommandLine.arguments.contains("--snapshot")
@@ -31,6 +32,15 @@ extension View {
 enum SnapshotRenderer {
     static func runIfRequested() {
         let args = CommandLine.arguments
+        // 진단용: 이 앱 번들의 macOS 알림 권한 상태를 출력하고 끝낸다.
+        if args.contains("--notification-status") {
+            UNUserNotificationCenter.current().getNotificationSettings { settings in
+                print("authorization=\(settings.authorizationStatus.rawValue) alertStyle=\(settings.alertStyle.rawValue) "
+                      + "alert=\(settings.alertSetting.rawValue) sound=\(settings.soundSetting.rawValue)")
+                exit(0)
+            }
+            return
+        }
         guard let index = args.firstIndex(of: "--snapshot"), index + 1 < args.count else { return }
         let output = URL(fileURLWithPath: args[index + 1])
         let model = AppModel.shared

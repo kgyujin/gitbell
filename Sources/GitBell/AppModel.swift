@@ -148,6 +148,8 @@ final class AppModel: ObservableObject {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
+        // 사용자가 시스템 설정에서 알림을 켜고 끌 수 있어 확인할 때마다 권한도 다시 읽는다.
+        refreshNotificationAuthorization()
 
         // gh 실행은 잠깐 막힐 수 있어 메인 스레드 밖에서 토큰을 찾는다.
         guard let token = await Task.detached(operation: { TokenStore.resolve() }).value else {
