@@ -39,7 +39,10 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Publish
-        run: npm publish --provenance --access public
+        # 신뢰 배포(OIDC)만 쓴다. setup-node가 넣는 자리표시 토큰을 비워, OIDC가 실패하면 그 이유가 그대로 보이게 한다.
+        env:
+          NODE_AUTH_TOKEN: ''
+        run: npm publish --provenance --access public --loglevel verbose
       - name: Tag
         run: |
           git tag "v${{ steps.version.outputs.version }}"
