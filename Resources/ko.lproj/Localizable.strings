@@ -1,0 +1,74 @@
+/* GitBell 한국어 문구. 키는 영어 원문이다. */
+
+/* 패널 위쪽 */
+"Mark all as read" = "모두 읽음";
+"Refresh" = "새로고침";
+"Settings" = "설정";
+
+/* 필터 */
+"All" = "전체";
+"PRs" = "PR";
+"Reviews" = "리뷰";
+"Commits" = "커밋";
+
+/* 활동 종류 */
+"Opened" = "PR 올라옴";
+"Merged" = "머지됨";
+"Closed" = "닫힘";
+"Approved" = "승인";
+"Changes requested" = "수정 요청";
+"Reviewed" = "리뷰";
+"Commented" = "댓글";
+"Pushed" = "push";
+"Pushed %lld commits" = "커밋 %lld개 push";
+"Force-pushed" = "강제 push";
+"New branch" = "새 브랜치";
+"Issue #%lld" = "이슈 #%lld";
+"bot" = "봇";
+
+/* 시간 */
+"now" = "방금";
+"Today" = "오늘";
+"Yesterday" = "어제";
+
+/* 목록 상태 */
+"Loading your GitHub activity…" = "GitHub 활동을 불러오는 중…";
+"No activity in the last day" = "최근 하루 동안 새 활동이 없습니다";
+"New pull requests, reviews, merges and commits will show up here." = "새 PR, 리뷰, 머지, 커밋이 생기면 여기에 뜹니다.";
+"Checking…" = "확인 중…";
+"Checked %@ · %lld repositories" = "%@ 확인 · 저장소 %lld개";
+"Open GitHub" = "GitHub 열기";
+
+/* 문제 */
+"Your GitHub token is invalid or expired. Update it in Settings." = "GitHub 토큰이 잘못됐거나 만료됐습니다. 설정에서 바꿔 주세요.";
+"Couldn't reach GitHub." = "GitHub에 연결하지 못했습니다.";
+"Couldn't read %lld repositories:" = "저장소 %lld개를 읽지 못했습니다:";
+
+/* 알림 */
+"%lld new activities" = "새 활동 %lld개";
+
+/* 설정 */
+"Back" = "뒤로";
+"Account" = "계정";
+"General" = "일반";
+"Check every" = "확인 간격";
+"%lld min" = "%lld분";
+"Show notifications" = "알림 표시";
+"Include my own activity" = "내 활동도 표시";
+"Open at login" = "로그인 시 자동 실행";
+"Quit GitBell" = "GitBell 종료";
+"Connected with GitHub CLI" = "GitHub CLI로 연결됨";
+"Connected with a personal access token" = "개인 액세스 토큰으로 연결됨";
+"Not connected" = "연결 안 됨";
+"Remove saved token" = "저장한 토큰 지우기";
+"Save" = "저장";
+"Create a token on GitHub (repo, notifications, read:org)" = "GitHub에서 토큰 만들기 (repo, notifications, read:org)";
+
+/* 처음 연결 */
+"Connect your GitHub account" = "GitHub 계정 연결";
+"GitBell reads your repositories and notifications to show pull requests, reviews, merges and commits." = "내 저장소와 알림을 읽어 PR, 리뷰, 머지, 커밋을 보여 줍니다.";
+"Already use GitHub CLI?" = "GitHub CLI를 쓰고 있다면";
+"Run this in Terminal, then check again." = "터미널에서 아래 명령을 실행한 뒤 '다시 확인'을 누르세요.";
+"Check again" = "다시 확인";
+"Or paste a personal access token" = "또는 개인 액세스 토큰 붙여넣기";
+"Your token is stored only in the macOS Keychain on this Mac." = "토큰은 이 Mac의 키체인에만 저장됩니다.";

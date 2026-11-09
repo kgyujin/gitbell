@@ -1,0 +1,45 @@
+{
+  "name": "gitbell",
+  "version": "0.1.0",
+  "description": "GitHub activity in your Mac menu bar: pull requests, reviews, merges and commits across all your repositories.",
+  "keywords": [
+    "github",
+    "notifications",
+    "menu-bar",
+    "macos",
+    "pull-requests",
+    "swiftui"
+  ],
+  "homepage": "https://github.com/kgyujin/gitbell#readme",
+  "bugs": "https://github.com/kgyujin/gitbell/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kgyujin/gitbell.git"
+  },
+  "license": "MIT",
+  "author": "kgyujin",
+  "bin": {
+    "gitbell": "bin/gitbell.js"
+  },
+  "files": [
+    "bin",
+    "Sources",
+    "Tests",
+    "Resources",
+    "scripts",
+    "Package.swift",
+    "README.md",
+    "README.ko.md",
+    "LICENSE"
+  ],
+  "os": [
+    "darwin"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "scripts/build-app.sh",
+    "test": "swift test"
+  }
+}
