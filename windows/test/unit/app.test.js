@@ -336,3 +336,72 @@ test('버전: Windows판과 npm 패키지 버전이 같다', () => {
   const root = require(path.join(ROOT, '..', 'package.json')).version;
   assert.equal(require(path.join(ROOT, 'package.json')).version, root);
 });
+
+// MARK: 리뷰에서 찾은 경합
+
+const flush = async () => { for (let i = 0; i < 20; i += 1) await new Promise((resolve) => setImmediate(resolve)); };
+
+test('AppModel: 확인 중에 간격을 바꿔도 확인 반복이 둘로 늘지 않는다', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let resolves = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const { model } = harness();
+  model.deps.tokens.resolve = async () => {
+    resolves += 1;
+    if (resolves === 1) await gate;
+    return null;
+  };
+  model.start();
+  t.mock.timers.tick(0);
+  await flush();
+  assert.equal(resolves, 1, '첫 확인이 토큰을 기다리는 중');
+  model.setRefreshMinutes(5);
+  t.mock.timers.tick(0);
+  await flush();
+  release();
+  await flush();
+  // 반복이 둘이면 같은 시각에 두 번씩 확인을 부른다(늦은 쪽은 '확인 중'이라 곧 끝나 토큰 조회로는 안 보인다).
+  let ticks = 0;
+  const refresh = model.refresh.bind(model);
+  model.refresh = () => { ticks += 1; return refresh(); };
+  for (let minute = 0; minute < 20; minute += 1) {
+    t.mock.timers.tick(60 * 1000);
+    await flush();
+  }
+  model.stop();
+  assert.equal(ticks, 4, '20분 동안 5분 간격이면 4번');
+});
+
+test('AppModel: 확인 중에 토큰을 바꾸면 예전 계정 결과를 버리고 다시 확인한다', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const routes = pushRoutes([push(1, 'amy')]);
+  const { model } = harness({ routes });
+  const createAPI = model.deps.createAPI;
+  const logins = [];
+  model.deps.createAPI = (token) => {
+    const api = createAPI(token);
+    return { async get(p) {
+      if (p === 'user') { logins.push(token); if (token === 'tok') await gate; return { login: token === 'tok' ? 'old' : 'new' }; }
+      return api.get(p);
+    } };
+  };
+  const first = model.refresh();
+  await flush();
+  const saving = model.saveToken('new-token');
+  release();
+  await Promise.all([first, saving]);
+  await flush();
+  assert.deepEqual(logins, ['tok', 'new-token'], '토큰을 바꾼 뒤 새 토큰으로 다시 확인');
+  assert.equal(model.state.me, 'new', '예전 계정 결과가 남지 않는다');
+});
+
+test('파일 저장: 바꿔 넣기가 막히면(Windows 잠금) 직접 쓴다', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitbell-lock-'));
+  const store = createFileStore(dir);
+  t.mock.method(fs, 'renameSync', () => { throw Object.assign(new Error('locked'), { code: 'EPERM' }); });
+  store.saveSettings({ refreshMinutes: 5 });
+  assert.deepEqual(store.loadSettings(), { refreshMinutes: 5 });
+  assert.deepEqual(fs.readdirSync(dir), ['settings.json']);
+});

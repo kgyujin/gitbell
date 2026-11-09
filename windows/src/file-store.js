@@ -14,12 +14,22 @@ function readJSON(file) {
   }
 }
 
-/** 쓰다가 꺼져도 파일이 반쯤 남지 않게 임시 파일에 쓴 뒤 바꿔 넣는다. */
+/**
+ * 쓰다가 꺼져도 파일이 반쯤 남지 않게 임시 파일에 쓴 뒤 바꿔 넣는다.
+ * Windows에서는 백신·검색 색인·OneDrive가 파일을 잠깐 잡고 있으면 바꿔 넣기가 실패할 수 있어, 그때는 직접 쓴다.
+ */
 function writeJSON(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  const text = JSON.stringify(value);
   const temp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(temp, JSON.stringify(value));
-  fs.renameSync(temp, file);
+  fs.writeFileSync(temp, text);
+  try {
+    fs.renameSync(temp, file);
+  } catch (error) {
+    if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+    fs.rmSync(temp, { force: true });
+    fs.writeFileSync(file, text);
+  }
 }
 
 function createFileStore(dir) {

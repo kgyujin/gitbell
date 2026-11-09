@@ -81,6 +81,11 @@ class AppModel {
     this.timer = null;
     this.checks = 0;
     this.demo = false;
+    /** 확인 반복의 세대. 간격을 바꾸면 올라가고, 예전 반복은 다음 확인을 잡지 않고 끝난다. */
+    this.loopGeneration = 0;
+    /** 계정(토큰)의 세대. 새로고침 도중 토큰이 바뀌면 그 결과를 버린다. */
+    this.accountGeneration = 0;
+    this.refreshAgain = false;
   }
 
   onChange(listener) {
@@ -99,6 +104,7 @@ class AppModel {
   }
 
   stop() {
+    this.loopGeneration += 1;
     clearTimeout(this.timer);
     this.timer = null;
   }
@@ -115,22 +121,43 @@ class AppModel {
   restartLoop() {
     this.stop();
     if (this.demo) return;
+    const generation = this.loopGeneration;
     const tick = async () => {
+      this.timer = null;
       await this.refresh();
       this.checks += 1;
       // 새 버전 확인은 하루에 몇 번이면 충분하다(12시간마다, 첫 확인 때 한 번).
       if (this.checks === 1 || this.checks % Math.max(1, Math.floor(720 / this.settings.refreshMinutes)) === 0) {
         await this.checkForUpdate();
       }
-      this.timer = setTimeout(tick, this.settings.refreshMinutes * 60 * 1000);
+      // 확인하는 동안 간격이 바뀌어 새 반복이 시작됐으면 이 반복은 여기서 끝난다.
+      if (generation === this.loopGeneration) this.timer = setTimeout(tick, this.settings.refreshMinutes * 60 * 1000);
     };
     this.timer = setTimeout(tick, 0);
   }
 
   async refresh() {
-    if (this.isRefreshing || this.demo) return;
+    if (this.demo) return;
+    if (this.isRefreshing) {
+      // 토큰을 바꾼 직후처럼 꼭 다시 확인해야 할 때는 지금 확인이 끝난 뒤 한 번 더 한다.
+      this.refreshAgain = true;
+      return;
+    }
     this.isRefreshing = true;
     this.emit();
+    try {
+      do {
+        this.refreshAgain = false;
+        await this.refreshOnce();
+      } while (this.refreshAgain);
+    } finally {
+      this.isRefreshing = false;
+      this.emit();
+    }
+  }
+
+  async refreshOnce() {
+    const account = this.accountGeneration;
     try {
       const token = await this.deps.tokens.resolve();
       if (!token) {
@@ -141,6 +168,8 @@ class AppModel {
       this.tokenSource = token.source;
       const result = await Poller.refresh(this.deps.createAPI(token.value), this.state,
         { now: this.deps.now(), includeOwn: this.settings.includeOwnActivity });
+      // 확인하는 동안 토큰이 바뀌었으면 예전 계정의 결과라 버린다(곧 다시 확인한다).
+      if (account !== this.accountGeneration) return;
       // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.
       this.state = WatchState.adoptingReadMarks(result.state, this.state);
       this.saveState();
@@ -148,12 +177,10 @@ class AppModel {
       const toNotify = Prefs.eventsToNotify(result.newEvents, this.settings.notificationPrefs, this.settings.display, this.state.me);
       if (toNotify.length) this.deps.notifier.post(toNotify, this.settings.notificationPrefs.playsSound);
     } catch (error) {
+      if (account !== this.accountGeneration) return;
       if (error && error.kind === 'unauthorized') this.problem = { type: 'unauthorized' };
       else if (error && error.kind === 'http') this.problem = { type: 'network', detail: `HTTP ${error.status} ${error.message}`.trim() };
       else this.problem = { type: 'network', detail: (error && error.message) || String(error) };
-    } finally {
-      this.isRefreshing = false;
-      this.emit();
     }
   }
 
@@ -342,6 +369,7 @@ class AppModel {
     this.tokenSaveFailed = !this.deps.tokens.save(trimmed);
     if (this.tokenSaveFailed) return this.emit();
     // 다른 계정일 수 있으니 기록을 비우고 첫 실행처럼 다시 채운다.
+    this.accountGeneration += 1;
     this.state = WatchState.createState();
     this.saveState();
     this.emit();
@@ -350,6 +378,7 @@ class AppModel {
 
   removeSavedToken() {
     this.deps.tokens.remove();
+    this.accountGeneration += 1;
     this.state = WatchState.createState();
     this.saveState();
     this.emit();

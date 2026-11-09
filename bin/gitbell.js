@@ -176,8 +176,8 @@ function checkWindows() {
 }
 
 /** 설치된 Electron 실행 파일. 없으면 null. */
-function windowsElectron() {
-  const dir = path.join(WIN_APP_DIR, 'node_modules', 'electron');
+function windowsElectron(appDir = WIN_APP_DIR) {
+  const dir = path.join(appDir, 'node_modules', 'electron');
   try {
     const exe = path.join(dir, 'dist', fs.readFileSync(path.join(dir, 'path.txt'), 'utf8').trim());
     return fs.existsSync(exe) ? exe : null;
@@ -197,33 +197,76 @@ function output(result) {
   return dim(`${result.stdout || ''}\n${result.stderr || ''}`.trim() || String(result.error || ''));
 }
 
-/** 실행 중이던 앱이 막 끝나 파일이 잠겨 있을 수 있어 몇 번 다시 시도한다. */
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** 실행 중이던 앱이 막 끝나 파일이 잠겨 있을 수 있어 몇 번 다시 시도하고, 그래도 안 되면 안내하고 끝낸다. */
 function removeDir(dir) {
-  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 500 });
+  } catch (error) {
+    fail(t(`Could not remove ${dir}.`, `${dir}을 지우지 못했습니다.`),
+      t('Quit GitBell (right-click the tray icon → Quit GitBell), then run this again.',
+        'GitBell을 끝낸 뒤(트레이 아이콘 우클릭 → GitBell 종료) 다시 실행하세요.') + `\n  ${dim(error.message)}`);
+  }
+}
+
+/**
+ * 준비한 폴더를 설치 위치로 옮긴다. 막 받은 electron.exe를 백신이 검사하느라 잠깐 잡고 있으면
+ * 옮기기가 실패할 수 있어 몇 번 다시 시도하고, 그래도 안 되면 복사한다.
+ */
+function moveIntoPlace(from, to) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      return fs.renameSync(from, to);
+    } catch (error) {
+      if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code)) throw error;
+      sleep(500);
+    }
+  }
+  fs.cpSync(from, to, { recursive: true });
+  removeDir(from);
+}
+
+/** 로그인 시 실행 항목과 시작 메뉴 바로가기. 앱이 망가져 스스로 지울 수 없을 때를 위해 설치기도 직접 지운다. */
+function removeWindowsIntegration() {
+  fs.rmSync(path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'GitBell.lnk'), { force: true });
+  // Electron은 로그인 항목 이름으로 AppUserModelID를 쓴다. 없으면 reg가 실패할 뿐이다.
+  run('reg', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', BUNDLE_ID, '/f'], { windowsHide: true });
 }
 
 function installWindows() {
   console.log(`\n${bold('GitBell')} ${dim('v' + VERSION)}  ${dim(t('GitHub activity in your system tray', '작업 표시줄 트레이에서 보는 GitHub 활동'))}\n`);
   checkWindows();
 
+  // 새 버전은 옆 폴더에서 다 준비한 뒤에만 바꿔 넣는다. 받기가 실패해도 쓰던 앱은 그대로 남는다.
+  const staging = `${WIN_INSTALL_DIR}.new`;
+  const stagingApp = path.join(staging, 'windows');
+  removeDir(staging);
+  for (const entry of WIN_APP_ENTRIES) {
+    fs.cpSync(path.join(PACKAGE_ROOT, 'windows', entry), path.join(stagingApp, entry), { recursive: true });
+  }
+  const strings = path.join('Resources', 'ko.lproj');
+  fs.cpSync(path.join(PACKAGE_ROOT, strings), path.join(staging, strings), { recursive: true });
+
+  step(t('Downloading Electron (about 100 MB the first time)…', 'Electron을 받는 중 (처음엔 약 100MB)…'));
+  const abort = (message, result) => {
+    removeDir(staging);
+    fail(message, output(result));
+  };
+  // Windows에서 npm은 npm.cmd라 셸로 실행한다. 인자는 고정값이다.
+  const npm = run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: stagingApp, shell: true });
+  if (npm.status !== 0) abort(t('Could not install Electron.', 'Electron을 설치하지 못했습니다.'), npm);
+  const download = run(process.execPath, [path.join(stagingApp, 'node_modules', 'electron', 'install.js')], { cwd: stagingApp });
+  if (download.status !== 0 || !windowsElectron(stagingApp)) abort(t('Could not download Electron.', 'Electron을 받지 못했습니다.'), download);
+
   step(t(`Installing to ${WIN_INSTALL_DIR}`, `${WIN_INSTALL_DIR}에 설치하는 중`));
   runWindowsApp('--quit');
   removeDir(WIN_INSTALL_DIR);
-  for (const entry of WIN_APP_ENTRIES) {
-    fs.cpSync(path.join(PACKAGE_ROOT, 'windows', entry), path.join(WIN_APP_DIR, entry), { recursive: true });
-  }
-  const strings = path.join('Resources', 'ko.lproj');
-  fs.cpSync(path.join(PACKAGE_ROOT, strings), path.join(WIN_INSTALL_DIR, strings), { recursive: true });
-
-  step(t('Downloading Electron (about 100 MB the first time)…', 'Electron을 받는 중 (처음엔 약 100MB)…'));
-  // Windows에서 npm은 npm.cmd라 셸로 실행한다. 인자는 고정값이다.
-  const npm = run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: WIN_APP_DIR, shell: true });
-  if (npm.status !== 0) fail(t('Could not install Electron.', 'Electron을 설치하지 못했습니다.'), output(npm));
-  const download = run(process.execPath, [path.join(WIN_APP_DIR, 'node_modules', 'electron', 'install.js')], { cwd: WIN_APP_DIR });
+  moveIntoPlace(staging, WIN_INSTALL_DIR);
   const exe = windowsElectron();
-  if (download.status !== 0 || !exe) {
-    fail(t('Could not download Electron.', 'Electron을 받지 못했습니다.'), output(download));
-  }
 
   // 시작 메뉴 바로가기가 있어야 알림에 GitBell 이름과 아이콘이 보인다.
   runWindowsApp('--create-shortcut');
@@ -247,7 +290,9 @@ function installWindows() {
 function uninstallWindows(purge) {
   // 실행 중인 앱을 끝내고 로그인 시 실행·시작 메뉴 바로가기를 지운다.
   runWindowsApp('--uninstall');
+  removeWindowsIntegration();
   removeDir(WIN_INSTALL_DIR);
+  removeDir(`${WIN_INSTALL_DIR}.new`);
   step(t(`Removed ${WIN_INSTALL_DIR}`, `${WIN_INSTALL_DIR}을 지웠습니다`));
   if (purge) {
     removeDir(WIN_DATA_DIR);

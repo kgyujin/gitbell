@@ -40,7 +40,8 @@ if (process.platform === 'win32') app.setAppUserModelId(BUNDLE_ID);
 if (process.env.GITBELL_DATA_DIR) app.setPath('userData', path.resolve(process.env.GITBELL_DATA_DIR));
 
 const shortcutPath = () => path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'GitBell.lnk');
-const loginItem = (openAtLogin) => ({ openAtLogin, path: process.execPath, args: [app.getAppPath()] });
+// Windows는 args를 따옴표 없이 이어 붙여 레지스트리에 넣으므로, 사용자 폴더에 빈칸이 있어도 되게 직접 감싼다.
+const loginItem = (openAtLogin) => ({ openAtLogin, path: process.execPath, args: [`"${app.getAppPath()}"`] });
 
 function runTask() {
   if (task === '--create-shortcut' && process.platform === 'win32') {
@@ -76,6 +77,7 @@ if (task) {
   });
   // 패널은 닫지 않고 숨기므로 창이 없다고 끝나지 않게 한다.
   app.on('window-all-closed', () => {});
+  app.on('before-quit', () => { quitting = true; });
   app.whenReady().then(start);
 }
 
@@ -84,6 +86,7 @@ let l10n;
 let panel;
 let tray;
 let lastHiddenAt = 0;
+let quitting = false;
 let lastTrayKey = '';
 const liveNotifications = new Set();
 
@@ -96,9 +99,7 @@ function start() {
     createAPI: (token) => createGitHubAPI({ token, baseURL: process.env.GITBELL_API_URL || undefined }),
     notifier: { post: postNotifications, postTest: postTestNotification },
     system: {
-      openURL: (url) => {
-        if (/^https:\/\//i.test(url)) shell.openExternal(url);
-      },
+      openURL: openHTTPS,
       copyText: (text) => clipboard.writeText(text),
       getLaunchAtLogin: () => process.platform === 'win32' && app.getLoginItemSettings(loginItem()).openAtLogin,
       setLaunchAtLogin: (on) => {
@@ -111,6 +112,8 @@ function start() {
   });
   if (isDemo) model.loadDemo(demoState());
 
+  // 기본 메뉴의 Ctrl+W(창 닫기) 같은 단축키가 패널에 걸리지 않게 메뉴를 없앤다.
+  Menu.setApplicationMenu(null);
   createPanel();
   createTray();
   model.onChange(() => {
@@ -153,6 +156,12 @@ function createPanel() {
   panel.webContents.on('will-navigate', (event) => event.preventDefault());
   panel.on('blur', () => {
     if (!panel.webContents.isDevToolsOpened()) hidePanel();
+  });
+  // Alt+F4 등으로 닫아도 창을 없애지 않고 숨긴다. 끝낼 때(before-quit)만 실제로 닫는다.
+  panel.on('close', (event) => {
+    if (quitting) return;
+    event.preventDefault();
+    hidePanel();
   });
   panel.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   if (has('--show')) panel.webContents.once('did-finish-load', () => showPanel());
@@ -251,13 +260,18 @@ function setTrayImage(images) {
 
 // MARK: 알림
 
+/** GitHub 자료에서 온 주소는 https만 연다. */
+function openHTTPS(url) {
+  if (/^https:\/\//i.test(url)) shell.openExternal(url);
+}
+
 function showNotification({ title, body, playsSound, url, id }) {
   if (!Notification.isSupported()) return;
   const notification = new Notification({ title, body, silent: !playsSound, icon: ICON });
   // 알림 객체가 사라지면 누름 이벤트도 사라져서, 닫힐 때까지 붙잡아 둔다.
   liveNotifications.add(notification);
   notification.on('click', () => {
-    if (url) shell.openExternal(url);
+    if (url) openHTTPS(url);
     if (id) model.markRead(id);
   });
   notification.on('close', () => liveNotifications.delete(notification));

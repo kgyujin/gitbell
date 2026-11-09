@@ -94,9 +94,18 @@ test('데모 패널: 트레이 아이콘을 그린다', async (t) => {
     assert.match(x2, /^data:image\/png;base64,/);
   }
   assert.notEqual(images[0].x2, images[1].x2);
-  // 주 프로세스가 그림을 받아 트레이에 넣었는지(빈 그림이 아닌지)
-  const tray = await app.evaluate(({ nativeImage }) => typeof nativeImage.createFromDataURL === 'function');
-  assert.equal(tray, true);
+});
+
+test('데모 패널: 창을 닫아도(Alt+F4) 없어지지 않고 숨는다', async (t) => {
+  const { app, window } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  const state = await app.evaluate(({ BrowserWindow }) => {
+    const panel = BrowserWindow.getAllWindows()[0];
+    return { exists: Boolean(panel) && !panel.isDestroyed(), visible: panel ? panel.isVisible() : null };
+  });
+  assert.deepEqual(state, { exists: true, visible: false });
 });
 
 test('데모 패널: 한국어와 어두운 테마', async (t) => {
