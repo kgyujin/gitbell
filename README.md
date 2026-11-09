@@ -36,7 +36,8 @@ That's it. The installer builds GitBell on your Mac, puts it in `~/Applications`
 
 - **Everything in one list.** Opened, merged and closed PRs, approvals, change requests, comments, pushes and new branches, across all your repositories.
 - **Native notifications.** Click one to jump straight to the pull request or commit.
-- **Quick filters.** All, PRs, Reviews, Commits. Unread items get a dot and a count on the bell.
+- **Filter, sort and search.** Narrow by type (PRs, Reviews, Commits), by repository, or to unread only. Sort newest first, by repository, or unread first. Search by title, repository, person or `#number`.
+- **Unread at a glance.** Unread items get a dot, the bell shows a count, and you can mark a whole repository as read.
 - **Quiet by default.** Your own activity and bot deploy pushes are hidden, so the list shows what others did.
 - **Private.** Talks only to the GitHub API. Your token stays in the macOS Keychain.
 - **English and Korean.** Follows your macOS language.

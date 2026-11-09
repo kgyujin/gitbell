@@ -8,6 +8,8 @@ import SwiftUI
 
 struct EventRow: View {
     let event: ActivityEvent
+    /// 저장소별로 묶어 보일 때는 묶음 제목에 저장소가 있어 줄마다 다시 쓰지 않는다.
+    var showsRepository = true
     let action: () -> Void
     @State private var hovering = false
 
@@ -44,11 +46,13 @@ struct EventRow: View {
     /// 저장소 이름은 가운데를 줄여 앞뒤가 보이게 하고, 시간은 항상 다 보인다.
     private var contextLine: some View {
         HStack(spacing: 4) {
-            Text(verbatim: event.repoName)
-                .fontWeight(.medium)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .layoutPriority(1)
+            if showsRepository {
+                Text(verbatim: event.repoName)
+                    .fontWeight(.medium)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .layoutPriority(1)
+            }
             let target = L10n.target(event)
             if !target.isEmpty {
                 Text(verbatim: target)

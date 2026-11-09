@@ -52,12 +52,38 @@ enum L10n {
         event.title.isEmpty ? kindLabel(event) : event.title
     }
 
-    static func filterLabel(_ filter: AppModel.Filter) -> String {
-        switch filter {
-        case .all: return string("All")
+    /// 종류 필터 이름. nil은 '전체'.
+    static func categoryLabel(_ category: EventCategory?) -> String {
+        switch category {
+        case .none: return string("All")
         case .pullRequests: return string("PRs")
         case .reviews: return string("Reviews")
         case .commits: return string("Commits")
+        }
+    }
+
+    static func sortLabel(_ sort: SortMode) -> String {
+        switch sort {
+        case .newest: return string("Newest")
+        case .byRepository: return string("By repository")
+        case .unreadFirst: return string("Unread first")
+        }
+    }
+
+    static func sortSymbol(_ sort: SortMode) -> String {
+        switch sort {
+        case .newest: return "clock"
+        case .byRepository: return "folder"
+        case .unreadFirst: return "circle.inset.filled"
+        }
+    }
+
+    static func sectionTitle(_ key: ActivitySection.Key) -> String {
+        switch key {
+        case let .day(date): return dayTitle(date)
+        case let .repository(repo): return repo.split(separator: "/").last.map(String.init) ?? repo
+        case .unread: return string("Unread")
+        case .read: return string("Read")
         }
     }
 

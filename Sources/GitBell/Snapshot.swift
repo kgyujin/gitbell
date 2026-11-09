@@ -1,6 +1,7 @@
 // 패널을 PNG로 그린다. README 스크린숏과 화면 확인에 쓴다. GitHub에는 요청하지 않는다.
 //
-//   GitBell.app/Contents/MacOS/GitBell --snapshot out.png [--demo] [--dark] [--settings] [--onboarding]
+//   GitBell.app/Contents/MacOS/GitBell --snapshot out.png [--demo] [--dark] [--by-repo | --unread-first]
+//                                      [--settings] [--onboarding]
 //   언어를 바꾸려면 뒤에 -AppleLanguages '(en)'을 붙인다.
 //
 // --demo는 가상 저장소(acme/…)와 가상 사람으로 채운다. 실제 저장소 이름이 이미지에 남지 않게 한다.
@@ -34,6 +35,9 @@ enum SnapshotRenderer {
         let output = URL(fileURLWithPath: args[index + 1])
         let model = AppModel.shared
         if args.contains("--demo") { model.loadDemo() } else { model.loadSavedStateOnly() }
+        model.query = ActivityQuery()
+        if args.contains("--by-repo") { model.query.sort = .byRepository }
+        if args.contains("--unread-first") { model.query.sort = .unreadFirst }
         if args.contains("--settings") { model.showingSettings = true }
         if args.contains("--onboarding") { model.simulateNoToken() }
 

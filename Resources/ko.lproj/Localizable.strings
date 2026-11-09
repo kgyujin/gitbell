@@ -11,6 +11,21 @@
 "Reviews" = "리뷰";
 "Commits" = "커밋";
 
+/* 저장소·정렬·검색 */
+"Unread" = "안 읽음";
+"Read" = "읽음";
+"All repositories" = "모든 저장소";
+"Newest" = "최신순";
+"By repository" = "저장소별";
+"Unread first" = "안 읽은 것 먼저";
+"Reset" = "초기화";
+"%lld items" = "%lld개";
+"Search" = "검색";
+"Search title, repository, person, #number" = "제목, 저장소, 사람, #번호로 찾기";
+"Mark as read" = "읽음 표시";
+"Nothing matches these filters" = "조건에 맞는 활동이 없습니다";
+"Reset filters" = "필터 초기화";
+
 /* 활동 종류 */
 "Opened" = "PR 올라옴";
 "Merged" = "머지됨";

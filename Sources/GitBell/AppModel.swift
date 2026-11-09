@@ -25,17 +25,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    enum Filter: String, CaseIterable, Identifiable {
-        case all, pullRequests, reviews, commits
-        var id: String { rawValue }
-    }
-
     @Published private(set) var state = WatchState()
     @Published private(set) var isRefreshing = false
     @Published private(set) var problem: Problem?
     @Published private(set) var tokenSource: TokenSource?
-    @Published var filter: Filter = .all
+    /// 목록 필터·검색·정렬. 검색어를 뺀 나머지는 다음에 열 때도 그대로 쓰도록 저장한다.
+    @Published var query = ActivityQuery() {
+        didSet { saveQuery() }
+    }
     @Published var showingSettings = false
+    @Published var showingSearch = false
 
     @Published var refreshMinutes: Int {
         didSet { defaults.set(refreshMinutes, forKey: Keys.refreshMinutes); restartLoop() }
@@ -54,6 +53,10 @@ final class AppModel: ObservableObject {
         static let refreshMinutes = "refreshMinutes"
         static let includeOwn = "includeOwnActivity"
         static let notifications = "notificationsEnabled"
+        static let category = "filterCategory"
+        static let repo = "filterRepository"
+        static let unreadOnly = "filterUnreadOnly"
+        static let sort = "sortMode"
     }
 
     private init() {
@@ -61,6 +64,20 @@ final class AppModel: ObservableObject {
         refreshMinutes = storedMinutes > 0 ? storedMinutes : 2
         includeOwnActivity = defaults.bool(forKey: Keys.includeOwn)
         notificationsEnabled = defaults.object(forKey: Keys.notifications) as? Bool ?? true
+        query = ActivityQuery(
+            category: defaults.string(forKey: Keys.category).flatMap(EventCategory.init(rawValue:)),
+            repo: defaults.string(forKey: Keys.repo),
+            unreadOnly: defaults.bool(forKey: Keys.unreadOnly),
+            sort: defaults.string(forKey: Keys.sort).flatMap(SortMode.init(rawValue:)) ?? .newest)
+    }
+
+    private func saveQuery() {
+        // 스냅숏은 같은 앱 설정을 쓰므로, 그림용으로 바꾼 필터가 사용자 설정에 남지 않게 한다.
+        guard !SnapshotMode.isOn else { return }
+        defaults.set(query.category?.rawValue, forKey: Keys.category)
+        defaults.set(query.repo, forKey: Keys.repo)
+        defaults.set(query.unreadOnly, forKey: Keys.unreadOnly)
+        defaults.set(query.sort.rawValue, forKey: Keys.sort)
     }
 
     // MARK: 스냅숏용 (GitHub에 요청하지 않는다)
@@ -131,13 +148,21 @@ final class AppModel: ObservableObject {
 
     // MARK: 항목
 
-    var visibleEvents: [ActivityEvent] {
-        switch filter {
-        case .all: return state.history
-        case .pullRequests: return state.history.filter { $0.kind.category == .pullRequests }
-        case .reviews: return state.history.filter { $0.kind.category == .reviews }
-        case .commits: return state.history.filter { $0.kind.category == .commits }
-        }
+    var sections: [ActivitySection] { query.sections(state.history) }
+
+    var repositories: [RepositorySummary] { RepositorySummary.from(state.history) }
+
+    var visibleCount: Int { query.filter(state.history).count }
+
+    /// 검색어와 필터를 지운다. 정렬 방식은 사용자가 고른 대로 둔다.
+    func resetFilters() {
+        query = ActivityQuery(sort: query.sort)
+        showingSearch = false
+    }
+
+    func markRead(repo: String) {
+        state.markRead(repo: repo)
+        saveState()
     }
 
     func open(_ event: ActivityEvent) {
