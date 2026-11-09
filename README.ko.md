@@ -72,6 +72,8 @@ npx gitbell uninstall               # 앱만 지우고 설정은 남기기
 npx gitbell uninstall --purge       # 설정, 기록, 저장한 토큰까지 지우기
 ```
 
+Windows에서는 다른 앱처럼 **설정 → 앱 → 설치된 앱 → GitBell → 제거**로 지울 수 있습니다. 트레이 아이콘을 우클릭해 **GitBell 제거…**를 눌러도 됩니다. 확인 창에서 체크하면 설정과 저장한 토큰도 함께 지웁니다.
+
 ## 자주 묻는 질문
 
 <details>
