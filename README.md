@@ -21,7 +21,7 @@ GitBell shows new **pull requests, reviews, comments, merges and commits** from 
 ## Install
 
 ```bash
-npx github:kgyujin/gitbell
+npx gitbell
 ```
 
 That's it. The installer builds GitBell on your Mac, puts it in `~/Applications`, and starts it. Look for the bell in your menu bar.
@@ -57,8 +57,8 @@ A typical check makes 10 to 20 API calls, well under GitHub's 5,000 per hour.
 ## Uninstall
 
 ```bash
-npx github:kgyujin/gitbell uninstall           # remove the app
-npx github:kgyujin/gitbell uninstall --purge   # also remove settings, history and the saved token
+npx gitbell uninstall           # remove the app
+npx gitbell uninstall --purge   # also remove settings, history and the saved token
 ```
 
 ## FAQ

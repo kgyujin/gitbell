@@ -17,8 +17,8 @@ const APP_PATH = path.join(APP_DIR, 'GitBell.app');
 const DATA_DIR = path.join(os.homedir(), 'Library', 'Application Support', 'GitBell');
 const BUNDLE_ID = 'io.github.kgyujin.gitbell';
 const VERSION = require(path.join(PACKAGE_ROOT, 'package.json')).version;
-// npm에 올리기 전까지는 GitHub 저장소에서 바로 실행하는 형태를 안내한다.
-const RUN = 'npx github:kgyujin/gitbell';
+// 안내에 쓰는 실행 명령. npm 패키지 이름과 같다.
+const RUN = 'npx gitbell';
 
 /** 설치기 문구 언어. 터미널 LANG이 영어여도 macOS 첫 번째 언어가 한국어면 한국어로 보인다. */
 function detectKorean() {

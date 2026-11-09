@@ -21,7 +21,7 @@ _GitHub 활동을 Mac 메뉴 막대에서 바로 봅니다._
 ## 설치
 
 ```bash
-npx github:kgyujin/gitbell
+npx gitbell
 ```
 
 이 명령 하나로 끝납니다. 설치기가 내 Mac에서 GitBell을 빌드해 `~/Applications`에 넣고 실행합니다. 메뉴 막대에 종 아이콘이 생깁니다.
@@ -57,8 +57,8 @@ GitBell은 2분마다 GitHub을 확인합니다. 간격은 1~15분 중 고를 �
 ## 지우기
 
 ```bash
-npx github:kgyujin/gitbell uninstall           # 앱만 지우기
-npx github:kgyujin/gitbell uninstall --purge   # 설정, 기록, 저장한 토큰까지 지우기
+npx gitbell uninstall           # 앱만 지우기
+npx gitbell uninstall --purge   # 설정, 기록, 저장한 토큰까지 지우기
 ```
 
 ## 자주 묻는 질문
