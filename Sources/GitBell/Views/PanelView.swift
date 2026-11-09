@@ -67,17 +67,17 @@ private struct HeaderView: View {
                     .foregroundStyle(.white)
             }
             Spacer()
-            IconButton(symbol: "magnifyingglass", help: "Search", isActive: model.showingSearch) {
+            IconButton(symbol: "magnifyingglass", help: "Search (⌘F)", isActive: model.showingSearch, shortcut: "f") {
                 model.showingSearch.toggle()
                 if !model.showingSearch { model.query.search = "" }
             }
-            if model.unreadCount > 0 {
-                IconButton(symbol: "checkmark.circle", help: "Mark all as read") { model.markRead() }
+            if model.visibleUnreadCount > 0 {
+                IconButton(symbol: "checkmark.circle", help: "Mark everything shown as read") { model.markRead() }
             }
-            IconButton(symbol: "arrow.clockwise", help: "Refresh", spinning: model.isRefreshing) {
+            IconButton(symbol: "arrow.clockwise", help: "Refresh (⌘R)", spinning: model.isRefreshing, shortcut: "r") {
                 Task { await model.refresh() }
             }
-            IconButton(symbol: "gearshape", help: "Settings") { model.showingSettings = true }
+            IconButton(symbol: "gearshape", help: "Settings (⌘,)", shortcut: ",") { model.showingSettings = true }
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
@@ -124,8 +124,12 @@ private struct FilterBar: View {
                         model.query.category = category
                     }
                 }
-                Spacer()
-                Chip(title: L10n.string("Unread"), symbol: "circle.fill", isSelected: model.query.unreadOnly) {
+                Spacer(minLength: 4)
+                Chip(title: L10n.string("Mine"), symbol: "person.fill", isSelected: model.query.mineOnly, small: true) {
+                    model.query.mineOnly.toggle()
+                }
+                .help(L10n.string("Show only others' activity on pull requests you opened. Notifications aren't affected."))
+                Chip(title: L10n.string("Unread"), symbol: "circle.fill", isSelected: model.query.unreadOnly, small: true) {
                     model.query.unreadOnly.toggle()
                 }
             }
@@ -268,8 +272,16 @@ private struct ActivityList: View {
                 LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) { content(sections) }
                     .padding(.bottom, 6)
             }
-            .frame(height: 480)
+            .frame(height: estimatedHeight(sections))
         }
+    }
+
+    /// 항목이 적을 때 아래가 텅 비지 않게 목록 높이를 내용에 맞춘다(최대 480).
+    private func estimatedHeight(_ sections: [ActivitySection]) -> CGFloat {
+        let rows = sections.flatMap(\.events).reduce(CGFloat(0)) { total, event in
+            total + (L10n.title(event).count > 44 ? 84 : 66)
+        }
+        return min(480, max(180, rows + CGFloat(sections.count) * 24 + 6))
     }
 
     @ViewBuilder
@@ -450,11 +462,13 @@ struct IconButton: View {
     let help: LocalizedStringKey
     var spinning = false
     var isActive = false
+    /// ⌘와 함께 누르는 단축키.
+    var shortcut: KeyEquivalent?
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
-        Button(action: action) {
+        let button = Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 13, weight: .medium))
                 .rotationEffect(.degrees(spinning ? 360 : 0))
@@ -467,6 +481,11 @@ struct IconButton: View {
         .buttonStyle(.plain)
         .help(help)
         .onHover { hovering = $0 }
+        if let shortcut {
+            button.keyboardShortcut(shortcut, modifiers: .command)
+        } else {
+            button
+        }
     }
 }
 
@@ -475,6 +494,8 @@ private struct Chip: View {
     let title: String
     var symbol: String?
     let isSelected: Bool
+    /// 오른쪽의 켜기·끄기 칩은 조금 작게 그린다.
+    var small = false
     let action: () -> Void
     @State private var hovering = false
 
@@ -486,8 +507,8 @@ private struct Chip: View {
                 }
                 Text(title)
             }
-            .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-            .padding(.horizontal, 10)
+            .font(.system(size: small ? 11 : 12, weight: isSelected ? .semibold : .regular))
+            .padding(.horizontal, small ? 8 : 10)
             .padding(.vertical, 4)
             .foregroundStyle(isSelected ? Color.white : Color.primary)
             .background(Capsule().fill(isSelected ? Color.accentColor : Color.primary.opacity(hovering ? 0.1 : 0.06)))

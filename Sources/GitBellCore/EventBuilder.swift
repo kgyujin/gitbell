@@ -21,6 +21,15 @@ public enum EventBuilder {
         func recent(_ date: Date?) -> Bool { date.map { $0 >= since } ?? false }
         func id(_ suffix: String) -> String { "\(repo)#\(suffix)" }
 
+        // '내 PR' 판단용: PR 번호·브랜치 → PR 올린 사람.
+        var authorByNumber: [Int: String] = [:]
+        var authorByBranch: [String: String] = [:]
+        for pull in raw.pulls {
+            guard let author = pull.user?.login else { continue }
+            authorByNumber[pull.number] = author
+            if let branch = pull.head?.ref { authorByBranch[branch] = author }
+        }
+
         var mergerBySHA: [String: GHUser] = [:]
         for item in raw.activity where item.activityType == "pr_merge" {
             if let after = item.after, let actor = item.actor { mergerBySHA[after] = actor }
@@ -112,6 +121,13 @@ public enum EventBuilder {
                 url: url, before: before, after: after, detailResolved: false))
         }
 
+        for index in events.indices {
+            if let branch = events[index].branch, events[index].kind.isPush {
+                events[index].prAuthor = authorByBranch[branch]
+            } else if let number = events[index].number, !events[index].isIssue {
+                events[index].prAuthor = authorByNumber[number]
+            }
+        }
         return events.sorted { $0.time < $1.time }
     }
 

@@ -60,9 +60,12 @@ struct EventRow: View {
                     .truncationMode(.tail)
             }
             Spacer(minLength: 8)
-            Text(L10n.relative(event.time))
-                .lineLimit(1)
-                .fixedSize()
+            // 패널을 열어 둔 동안에도 '3분 전' 같은 시간이 바뀌게 30초마다 다시 그린다.
+            TimelineView(.periodic(from: .now, by: 30)) { _ in
+                Text(L10n.relative(event.time))
+                    .lineLimit(1)
+                    .fixedSize()
+            }
         }
         .font(.system(size: 11))
         .foregroundStyle(.secondary)

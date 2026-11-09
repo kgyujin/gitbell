@@ -1,6 +1,6 @@
 // 패널을 PNG로 그린다. README 스크린숏과 화면 확인에 쓴다. GitHub에는 요청하지 않는다.
 //
-//   GitBell.app/Contents/MacOS/GitBell --snapshot out.png [--demo] [--dark] [--by-repo | --unread-first]
+//   GitBell.app/Contents/MacOS/GitBell --snapshot out.png [--demo] [--dark] [--by-repo | --unread-first] [--mine]
 //                                      [--settings] [--onboarding]
 //   언어를 바꾸려면 뒤에 -AppleLanguages '(en)'을 붙인다.
 //
@@ -48,6 +48,7 @@ enum SnapshotRenderer {
         model.query = ActivityQuery()
         if args.contains("--by-repo") { model.query.sort = .byRepository }
         if args.contains("--unread-first") { model.query.sort = .unreadFirst }
+        if args.contains("--mine") { model.query.mineOnly = true }
         if args.contains("--settings") { model.showingSettings = true }
         if args.contains("--update") { model.simulateUpdate("9.9.9") }
         if args.contains("--onboarding") { model.simulateNoToken() }
@@ -79,7 +80,8 @@ enum DemoData {
         state.checkedRepos = ["acme/web", "acme/api", "acme/design-system", "you/dotfiles"]
         state.history = [
             ActivityEvent(id: "1", repo: "acme/web", kind: .reviewApproved, time: ago(3), actor: "mina",
-                          number: 128, title: "Looks great, ship it 🚀", url: url("acme/web/pull/128"), isUnread: true),
+                          number: 128, title: "Looks great, ship it 🚀", url: url("acme/web/pull/128"), isUnread: true,
+                          prAuthor: "you"),
             ActivityEvent(id: "2", repo: "acme/api", kind: .prOpened, time: ago(12), actor: "jun",
                           number: 342, title: "Add rate limiting to public endpoints", url: url("acme/api/pull/342"),
                           isUnread: true),
@@ -94,7 +96,8 @@ enum DemoData {
             ActivityEvent(id: "5", repo: "acme/api", kind: .prMerged, time: ago(95), actor: "mina", number: 339,
                           title: "Migrate auth tokens to rotating keys", url: url("acme/api/pull/339")),
             ActivityEvent(id: "6", repo: "acme/web", kind: .comment, time: ago(130), actor: "jun", number: 127,
-                          title: "Can we keep the old route as a redirect for a week?", url: url("acme/web/pull/127")),
+                          title: "Can we keep the old route as a redirect for a week?", url: url("acme/web/pull/127"),
+                          prAuthor: "you"),
             ActivityEvent(id: "7", repo: "acme/api", kind: .branchCreated, time: ago(60 * 20), actor: "sora",
                           branch: "fix/timeout", title: "fix: raise upstream timeout to 30s", url: url("acme/api")),
             ActivityEvent(id: "8", repo: "acme/design-system", kind: .prOpened, time: ago(60 * 22), actor: "lee",

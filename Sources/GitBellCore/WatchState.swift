@@ -23,7 +23,8 @@ public struct WatchConfig: Sendable {
 }
 
 public struct WatchState: Codable, Sendable {
-    public static let currentVersion = 1
+    /// 2: 0.4.0에서 prAuthor가 생겨, 예전 기록을 다시 채우도록 올렸다.
+    public static let currentVersion = 2
 
     public var version = WatchState.currentVersion
     public var me = ""
@@ -51,7 +52,15 @@ public struct WatchState: Codable, Sendable {
                                config: WatchConfig = WatchConfig()) -> [ActivityEvent] {
         let isFirstRun = lastChecked == nil
         var toNotify: [ActivityEvent] = []
-        for var event in events where seen[event.id] == nil {
+        for var event in events {
+            guard seen[event.id] == nil else {
+                // 이미 본 항목이라도 예전 기록에 없던 PR 작성자 정보는 채운다.
+                if let author = event.prAuthor,
+                   let index = history.firstIndex(where: { $0.id == event.id && $0.prAuthor == nil }) {
+                    history[index].prAuthor = author
+                }
+                continue
+            }
             seen[event.id] = event.time
             if !includeOwn, !me.isEmpty, event.actor == me { continue }
             event.isUnread = !isFirstRun
@@ -71,6 +80,17 @@ public struct WatchState: Codable, Sendable {
         for index in history.indices where id == nil || history[index].id == id {
             history[index].isUnread = false
         }
+    }
+
+    /// 새로고침 결과에 지금 상태의 읽음 표시를 옮겨 온다.
+    /// 새로고침이 도는 몇 초 동안 사용자가 읽음·안 읽음을 바꾸면, 결과가 그 표시를 덮어쓰지 않게 한다.
+    public func adoptingReadMarks(from current: WatchState) -> WatchState {
+        let marks = Dictionary(current.history.map { ($0.id, $0.isUnread) }, uniquingKeysWith: { first, _ in first })
+        var merged = self
+        for index in merged.history.indices {
+            if let isUnread = marks[merged.history[index].id] { merged.history[index].isUnread = isUnread }
+        }
+        return merged
     }
 
     public mutating func update(_ event: ActivityEvent) {

@@ -1,6 +1,6 @@
 {
   "name": "gitbell",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "GitHub activity in your Mac menu bar: pull requests, reviews, merges and commits across all your repositories.",
   "keywords": [
     "github",

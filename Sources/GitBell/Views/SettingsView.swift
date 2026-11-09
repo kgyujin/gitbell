@@ -61,6 +61,11 @@ private struct NotificationSection: View {
             SwitchRow(symbol: "speaker.wave.2", title: L10n.string("Play sound"), isOn: $model.notificationPrefs.playsSound)
                 .disabledLook(!model.notificationPrefs.isEnabled)
             RowDivider()
+            SwitchRow(symbol: "person.crop.circle.badge.checkmark", title: L10n.string("Notify only for my pull requests"),
+                      subtitle: L10n.string("Reviews, comments, merges and pushes on PRs you opened. The list isn't affected."),
+                      isOn: $model.notificationPrefs.onlyMyPullRequests)
+                .disabledLook(!model.notificationPrefs.isEnabled)
+            RowDivider()
             VStack(alignment: .leading, spacing: 0) {
                 Text("Notify about")
                     .font(.system(size: 11))

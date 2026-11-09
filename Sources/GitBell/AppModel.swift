@@ -73,6 +73,7 @@ final class AppModel: ObservableObject {
         static let category = "filterCategory"
         static let repo = "filterRepository"
         static let unreadOnly = "filterUnreadOnly"
+        static let mineOnly = "filterMineOnly"
         static let sort = "sortMode"
     }
 
@@ -93,6 +94,7 @@ final class AppModel: ObservableObject {
             category: defaults.string(forKey: Keys.category).flatMap(EventCategory.init(rawValue:)),
             repo: defaults.string(forKey: Keys.repo),
             unreadOnly: defaults.bool(forKey: Keys.unreadOnly),
+            mineOnly: defaults.bool(forKey: Keys.mineOnly),
             sort: defaults.string(forKey: Keys.sort).flatMap(SortMode.init(rawValue:)) ?? .newest)
     }
 
@@ -161,10 +163,12 @@ final class AppModel: ObservableObject {
         let poller = ActivityPoller(api: URLSessionGitHubAPI(token: token.value))
         do {
             let result = try await poller.refresh(state, now: Date(), includeOwn: includeOwnActivity)
-            state = result.state
+            // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.
+            state = result.state.adoptingReadMarks(from: state)
             saveState()
             problem = result.failedRepos.isEmpty ? nil : .partial(result.failedRepos)
-            let toNotify = eventsToNotify(result.newEvents, notifications: notificationPrefs, display: display)
+            let toNotify = eventsToNotify(result.newEvents, notifications: notificationPrefs, display: display,
+                                          me: state.me)
             Notifier.shared.post(toNotify, playsSound: notificationPrefs.playsSound)
         } catch GitHubError.unauthorized {
             problem = .unauthorized
@@ -184,11 +188,21 @@ final class AppModel: ObservableObject {
 
     var unreadCount: Int { state.unreadCount(visibleTo: display) }
 
-    var sections: [ActivitySection] { query.sections(visibleHistory) }
+    /// 저장한 필터에 내 로그인 이름을 붙인 것('내 PR' 판단에 필요).
+    private var effectiveQuery: ActivityQuery {
+        var current = query
+        current.me = state.me
+        return current
+    }
+
+    var sections: [ActivitySection] { effectiveQuery.sections(visibleHistory) }
 
     var repositories: [RepositorySummary] { RepositorySummary.from(visibleHistory) }
 
-    var visibleCount: Int { query.filter(visibleHistory).count }
+    var visibleCount: Int { effectiveQuery.filter(visibleHistory).count }
+
+    /// 지금 보이는(필터를 거친) 항목 중 안 읽은 수. '모두 읽음' 버튼에 쓴다.
+    var visibleUnreadCount: Int { effectiveQuery.filter(visibleHistory).filter(\.isUnread).count }
 
     /// 검색어와 필터를 지운다. 정렬 방식은 사용자가 고른 대로 둔다.
     func resetFilters() {
@@ -203,8 +217,8 @@ final class AppModel: ObservableObject {
 
     func markRead(_ id: String? = nil) {
         if id == nil {
-            // '모두 읽음'은 보이는 항목에만 적용한다. 숨긴 저장소는 숨긴 상태 그대로 둔다.
-            for event in visibleHistory where event.isUnread { state.markRead(event.id) }
+            // '모두 읽음'은 지금 화면에 보이는 항목에만 적용한다(필터·숨긴 저장소 반영).
+            for event in effectiveQuery.filter(visibleHistory) where event.isUnread { state.markRead(event.id) }
         } else {
             state.markRead(id)
         }
@@ -326,6 +340,7 @@ final class AppModel: ObservableObject {
         defaults.set(query.category?.rawValue, forKey: Keys.category)
         defaults.set(query.repo, forKey: Keys.repo)
         defaults.set(query.unreadOnly, forKey: Keys.unreadOnly)
+        defaults.set(query.mineOnly, forKey: Keys.mineOnly)
         defaults.set(query.sort.rawValue, forKey: Keys.sort)
     }
 

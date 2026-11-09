@@ -18,21 +18,26 @@ public struct ActivityQuery: Equatable, Sendable {
     public var category: EventCategory?
     public var repo: String?
     public var unreadOnly = false
+    /// 내가 올린 PR에서 다른 사람이 한 활동만.
+    public var mineOnly = false
     public var search = ""
     public var sort: SortMode = .newest
+    /// 내 로그인 이름. mineOnly 판단에만 쓰며 저장하지 않는다.
+    public var me = ""
 
     public init(category: EventCategory? = nil, repo: String? = nil, unreadOnly: Bool = false,
-                search: String = "", sort: SortMode = .newest) {
+                mineOnly: Bool = false, search: String = "", sort: SortMode = .newest) {
         self.category = category
         self.repo = repo
         self.unreadOnly = unreadOnly
+        self.mineOnly = mineOnly
         self.search = search
         self.sort = sort
     }
 
     /// 기본값과 다른 필터가 걸려 있는지(정렬은 필터가 아니라 세지 않는다).
     public var isFiltering: Bool {
-        category != nil || repo != nil || unreadOnly || !trimmedSearch.isEmpty
+        category != nil || repo != nil || unreadOnly || mineOnly || !trimmedSearch.isEmpty
     }
 
     var trimmedSearch: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -43,6 +48,7 @@ public struct ActivityQuery: Equatable, Sendable {
             if let category, event.kind.category != category { return false }
             if let repo, event.repo != repo { return false }
             if unreadOnly, !event.isUnread { return false }
+            if mineOnly, !event.isOnMyPullRequest(me: me) { return false }
             if !terms.isEmpty {
                 let haystack = Self.searchText(event)
                 // 낱말마다 어딘가에 들어 있으면 된다. "web merge"처럼 저장소와 내용을 섞어 찾을 수 있다.
@@ -129,6 +135,13 @@ public struct RepositorySummary: Identifiable, Equatable, Sendable {
             byRepo[event.repo] = summary
         }
         return byRepo.values.sorted { $0.latest > $1.latest }
+    }
+}
+
+extension ActivityEvent {
+    /// 내가 올린 PR에서 다른 사람이 한 활동인지.
+    public func isOnMyPullRequest(me: String) -> Bool {
+        !me.isEmpty && prAuthor == me && actor != me
     }
 }
 

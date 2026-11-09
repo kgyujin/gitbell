@@ -64,13 +64,23 @@ function checkPlatform() {
   }
 }
 
+/** Package.swift가 swift-tools-version 5.10을 쓰므로 Swift 5.10(Xcode 15.3) 이상이 필요하다. */
 function checkSwift() {
-  const result = run('xcrun', ['--find', 'swift']);
+  const result = run('xcrun', ['swift', '--version']);
   if (result.status !== 0) {
     fail(
       t('Swift is not installed.', 'Swift가 설치되어 있지 않습니다.'),
       t('Install the Xcode command line tools, then run this again:', 'Xcode 명령줄 도구를 설치한 뒤 다시 실행하세요:') +
         `\n  ${bold('xcode-select --install')}`,
+    );
+  }
+  const match = `${result.stdout}${result.stderr}`.match(/Swift version (\d+)\.(\d+)/);
+  if (match && (Number(match[1]) < 5 || (Number(match[1]) === 5 && Number(match[2]) < 10))) {
+    fail(
+      t(`Swift ${match[1]}.${match[2]} is too old. GitBell needs Swift 5.10 or later.`,
+        `Swift ${match[1]}.${match[2]}는 너무 오래됐습니다. GitBell은 Swift 5.10 이상이 필요합니다.`),
+      t('Update Xcode (15.3 or later) or the command line tools in Software Update, then run this again.',
+        '소프트웨어 업데이트에서 Xcode(15.3 이상)나 명령줄 도구를 업데이트한 뒤 다시 실행하세요.'),
     );
   }
 }
@@ -131,6 +141,8 @@ function uninstall(purge) {
   quitRunningApp();
   fs.rmSync(APP_PATH, { recursive: true, force: true });
   step(t(`Removed ${APP_PATH}`, `${APP_PATH}을 지웠습니다`));
+  console.log(dim(t('  If you turned on "Open at login", remove GitBell in System Settings → General → Login Items.',
+    '  "로그인 시 자동 실행"을 켰다면 시스템 설정 → 일반 → 로그인 항목에서 GitBell을 지우세요.')));
   if (purge) {
     fs.rmSync(DATA_DIR, { recursive: true, force: true });
     run('defaults', ['delete', BUNDLE_ID]);

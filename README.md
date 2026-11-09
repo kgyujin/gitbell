@@ -7,17 +7,16 @@
 _Your GitHub activity, one click away in the Mac menu bar._
 
 [![npm](https://img.shields.io/npm/v/gitbell?logo=npm)](https://www.npmjs.com/package/gitbell)
-[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](#requirements)
-[![Swift](https://img.shields.io/badge/Swift-5.10%2B-F05138?logo=swift&logoColor=white)](Package.swift)
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](#install)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[Install](#install) · [Features](#features) · [How it works](#how-it-works) · [FAQ](#faq) · [한국어](README.ko.md)
+[Install](#install) · [Features](#features) · [Tips](#tips) · [FAQ](#faq) · [한국어](README.ko.md)
 
 <img src="docs/screenshot-en.png" alt="GitBell panel showing pull requests, reviews, merges and commits" width="420">
 
 </div>
 
-GitBell shows new **pull requests, reviews, comments, merges and commits** from every repository you can access, right in your menu bar. No Slack bot, no webhooks, nothing to set up on the repository side.
+GitBell shows new **pull requests, reviews, comments, merges and commits** from every repository you can access, and notifies you when something happens. Nothing to set up on the repository side: no bots, no webhooks.
 
 ## Install
 
@@ -25,43 +24,38 @@ GitBell shows new **pull requests, reviews, comments, merges and commits** from 
 npx gitbell
 ```
 
-That's it. The installer builds GitBell on your Mac, puts it in `~/Applications`, and starts it. Look for the bell in your menu bar.
+GitBell builds on your Mac, installs to `~/Applications`, and starts. Click the bell in the menu bar.
 
 > [!NOTE]
-> Building on your own Mac means macOS opens the app without the "unidentified developer" warning. The first build takes about a minute. You need the Xcode command line tools (`xcode-select --install`).
+> Needs macOS 13 or later, Node.js 18+, and the Xcode command line tools (`xcode-select --install`). Because the app is built on your own Mac, macOS opens it without the "unidentified developer" warning.
 
-**Connect GitHub.** If you already use [GitHub CLI](https://cli.github.com), you're done: GitBell uses your `gh` login. Otherwise, paste a [personal access token](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell) with the `repo`, `notifications` and `read:org` scopes.
+**Connect GitHub.** If you use [GitHub CLI](https://cli.github.com), there's nothing to do. Otherwise, paste a [personal access token](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell) with `repo`, `notifications` and `read:org` into the app.
 
 ## Features
 
-- **Everything in one list.** Opened, merged and closed PRs, approvals, change requests, comments, pushes and new branches, across all your repositories.
-- **Notifications your way.** Native macOS banners with optional sound. Turn each type on or off: new PRs, merges, reviews, comments, commits. Click one to jump straight to it.
-- **Filter, sort and search.** Narrow by type (PRs, Reviews, Commits), by repository, or to unread only. Sort newest first, by repository, or unread first. Search by title, repository, person or `#number`.
-- **Unread at a glance.** Unread items get a dot, the bell shows a count, and you can mark a whole repository as read.
-- **Quiet by default.** Your own activity and bot deploy pushes are hidden. Hide noisy repositories or all bot activity with a right-click or a switch.
-- **Right-click actions.** Open, copy link, mark as read or unread, show only that repository, or hide it.
-- **Private.** Talks to the GitHub API, plus npm twice a day to check for a new version. Your token stays in the macOS Keychain.
+- **One list for everything.** PRs opened, merged or closed, approvals, change requests, comments, pushes and new branches.
+- **Notifications you control.** Native banners with optional sound. Turn each type on or off, or only hear about pull requests you opened.
+- **Find things fast.** Filter by type, repository, unread or **Mine** (others' activity on your PRs). Sort by newest, by repository or unread first. Search titles, people and `#numbers`.
+- **Less noise.** Your own activity is hidden by default. Hide a busy repository with a right-click, or hide all bot accounts with one switch.
+- **Private.** Talks only to GitHub, plus npm twice a day to check for updates. Your token stays in the macOS Keychain.
 - **English and Korean.** Follows your macOS language.
 
-## How it works
+## Tips
 
-GitBell checks GitHub every 2 minutes (1 to 15, your choice). Reading 100+ repositories each time would hit the API limit, so it only reads repositories that **moved**:
-
-| Picked when | Catches |
+| Do this | How |
 | --- | --- |
-| Pushed to in the last 3 days | commits, new PRs, merges |
-| New item in your GitHub notifications | comments and reviews on quieter repositories |
+| Search | <kbd>⌘</kbd> <kbd>F</kbd> |
+| Refresh now | <kbd>⌘</kbd> <kbd>R</kbd> |
+| Open settings | <kbd>⌘</kbd> <kbd>,</kbd> |
+| Copy link, mark unread, hide a repository | Right-click an item |
+| Mark a whole repository as read | Sort **By repository**, then **Mark as read** on its header |
 
-A typical check makes 10 to 20 API calls, well under GitHub's 5,000 per hour.
-
-> [!TIP]
-> On first launch GitBell fills the last 24 hours as already read, so you don't get a burst of old notifications.
-
-## Uninstall
+## Update and uninstall
 
 ```bash
-npx gitbell uninstall           # remove the app
-npx gitbell uninstall --purge   # also remove settings, history and the saved token
+npx gitbell@latest                  # update (GitBell also tells you when a new version is out)
+npx gitbell uninstall               # remove the app, keep settings
+npx gitbell uninstall --purge       # also remove settings, history and the saved token
 ```
 
 ## FAQ
@@ -69,29 +63,22 @@ npx gitbell uninstall --purge   # also remove settings, history and the saved to
 <details>
 <summary><b>A repository is missing.</b></summary>
 
-GitBell reads repositories you own, collaborate on, or reach through an organization. Comments on a repository with no recent pushes show up only if you watch it on GitHub. If you set a repository to **Ignore**, GitHub sends no notifications for it.
+GitBell checks repositories with a push in the last 3 days, plus any repository with new GitHub notifications. Quiet repositories show up as soon as something happens in them. Check that you aren't set to **Ignore** for the repository on GitHub, and that it isn't in **Settings → Hidden repositories**.
+
+For organizations that use SAML single sign-on, authorize your token for the organization: run `gh auth refresh`, or use **Configure SSO** next to your token on GitHub.
 </details>
 
 <details>
 <summary><b>I don't see notification banners.</b></summary>
 
-In GitBell, open **Settings → Notifications** and press **Send test**. If nothing appears, open **System Settings → Notifications → GitBell**, turn on **Allow notifications**, and set the style to **Banners** or **Alerts**. Focus modes can also hide banners.
+Open **Settings → Notifications** in GitBell and press **Send test**. If nothing appears, open **System Settings → Notifications → GitBell**, allow notifications, and choose **Banners** or **Alerts**. Focus modes also hide banners.
 </details>
 
 <details>
-<summary><b>Can I build it myself?</b></summary>
+<summary><b>How do I build it from source?</b></summary>
 
 ```bash
 git clone https://github.com/kgyujin/gitbell && cd gitbell
-swift test                 # run the tests
-scripts/build-app.sh       # builds dist/GitBell.app
+swift test && scripts/build-app.sh   # creates dist/GitBell.app
 ```
-
-To render the panel to an image with sample data: `dist/GitBell.app/Contents/MacOS/GitBell --snapshot out.png --demo [--dark]`.
 </details>
-
-## Requirements
-
-- macOS 13 Ventura or later
-- Xcode command line tools (for the install build)
-- Node.js 18+ (for `npx`)

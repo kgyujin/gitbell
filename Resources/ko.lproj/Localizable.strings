@@ -26,6 +26,16 @@
 "Nothing matches these filters" = "조건에 맞는 활동이 없습니다";
 "Reset filters" = "필터 초기화";
 
+/* 0.4.0: 내 PR, 단축키 */
+"Mine" = "내 PR";
+"Show only others' activity on pull requests you opened. Notifications aren't affected." = "목록에서 내가 올린 PR에 다른 사람이 한 활동만 봅니다. 알림에는 영향이 없습니다.";
+"Notify only for my pull requests" = "내 PR 소식만 알림";
+"Reviews, comments, merges and pushes on PRs you opened. The list isn't affected." = "내가 올린 PR의 리뷰, 댓글, 머지, push만 알립니다. 목록에는 영향이 없습니다.";
+"Search (⌘F)" = "검색 (⌘F)";
+"Refresh (⌘R)" = "새로고침 (⌘R)";
+"Settings (⌘,)" = "설정 (⌘,)";
+"Mark everything shown as read" = "보이는 항목 모두 읽음";
+
 /* 우클릭 메뉴·새 버전 */
 "Open in browser" = "브라우저에서 열기";
 "Copy link" = "링크 복사";

@@ -32,11 +32,25 @@ public struct NotificationPreferences: Codable, Equatable, Sendable {
     public var playsSound = true
     /// 알림을 받을 묶음. 처음에는 모두 켠다.
     public var groups = Set(NotificationGroup.allCases)
+    /// 내가 올린 PR에서 일어난 활동만 알린다.
+    public var onlyMyPullRequests = false
 
     public init() {}
 
-    public func allows(_ event: ActivityEvent) -> Bool {
-        isEnabled && groups.contains(event.kind.notificationGroup)
+    /// 새 필드가 생겨도 예전에 저장한 설정을 잃지 않도록, 없는 값은 기본값으로 채운다.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = NotificationPreferences()
+        isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? defaults.isEnabled
+        playsSound = try container.decodeIfPresent(Bool.self, forKey: .playsSound) ?? defaults.playsSound
+        groups = try container.decodeIfPresent(Set<NotificationGroup>.self, forKey: .groups) ?? defaults.groups
+        onlyMyPullRequests = try container.decodeIfPresent(Bool.self, forKey: .onlyMyPullRequests)
+            ?? defaults.onlyMyPullRequests
+    }
+
+    public func allows(_ event: ActivityEvent, me: String = "") -> Bool {
+        guard isEnabled, groups.contains(event.kind.notificationGroup) else { return false }
+        return !onlyMyPullRequests || event.isOnMyPullRequest(me: me)
     }
 }
 
@@ -63,8 +77,8 @@ public struct DisplayPreferences: Codable, Equatable, Sendable {
 
 /// 새 항목 중 실제로 알림을 띄울 것만 고른다.
 public func eventsToNotify(_ events: [ActivityEvent], notifications: NotificationPreferences,
-                           display: DisplayPreferences) -> [ActivityEvent] {
-    events.filter { display.shows($0) && notifications.allows($0) }
+                           display: DisplayPreferences, me: String = "") -> [ActivityEvent] {
+    events.filter { display.shows($0) && notifications.allows($0, me: me) }
 }
 
 extension WatchState {

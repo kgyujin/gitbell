@@ -50,6 +50,9 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
     /// push의 커밋 제목을 이미 읽었는지(실패해도 다시 읽지 않는다).
     public var detailResolved: Bool
     public var isUnread: Bool
+    /// 이 활동이 일어난 PR을 올린 사람. '내 PR' 필터와 알림에 쓴다. 알 수 없으면 nil.
+    /// 0.3.x 기록에는 없는 필드라 선택값으로 둔다(디코딩 시 없으면 nil).
+    public var prAuthor: String?
 
     public var repoName: String { repo.split(separator: "/").last.map(String.init) ?? repo }
 
@@ -57,7 +60,7 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
                 actorAvatarURL: URL? = nil, number: Int? = nil, branch: String? = nil,
                 title: String, url: URL, isIssue: Bool = false, commitCount: Int? = nil,
                 before: String? = nil, after: String? = nil, detailResolved: Bool = true,
-                isUnread: Bool = false) {
+                isUnread: Bool = false, prAuthor: String? = nil) {
         self.id = id
         self.repo = repo
         self.kind = kind
@@ -74,6 +77,7 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
         self.after = after
         self.detailResolved = detailResolved
         self.isUnread = isUnread
+        self.prAuthor = prAuthor
     }
 }
 
@@ -85,7 +89,10 @@ public struct GHUser: Decodable, Sendable {
 }
 
 public struct GHPull: Decodable, Sendable {
+    public struct Head: Decodable, Sendable { public var ref: String }
     public var number: Int
+    /// PR의 브랜치. 그 브랜치에 들어온 push가 누구 PR인지 찾는 데 쓴다.
+    public var head: Head?
     public var title: String
     public var htmlUrl: URL
     public var user: GHUser?
