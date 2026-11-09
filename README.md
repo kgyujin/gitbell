@@ -72,6 +72,8 @@ npx gitbell uninstall               # remove the app, keep settings
 npx gitbell uninstall --purge       # also remove settings, history and the saved token
 ```
 
+On Windows you can also remove GitBell like any other app: **Settings → Apps → Installed apps → GitBell → Uninstall**, or right-click the tray icon and choose **Uninstall GitBell…**. Tick the box in the dialog to delete your settings and saved token too.
+
 ## FAQ
 
 <details>

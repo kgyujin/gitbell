@@ -229,12 +229,9 @@ function moveIntoPlace(from, to) {
   removeDir(from);
 }
 
-/** 로그인 시 실행 항목과 시작 메뉴 바로가기. 앱이 망가져 스스로 지울 수 없을 때를 위해 설치기도 직접 지운다. */
-function removeWindowsIntegration() {
-  fs.rmSync(path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
-    'Microsoft', 'Windows', 'Start Menu', 'Programs', 'GitBell.lnk'), { force: true });
-  // Electron은 로그인 항목 이름으로 AppUserModelID를 쓴다. 없으면 reg가 실패할 뿐이다.
-  run('reg', ['delete', 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run', '/v', BUNDLE_ID, '/f'], { windowsHide: true });
+/** 설치된 앱 목록 등록·제거(앱과 같은 코드를 쓴다). */
+function windowsUninstall() {
+  return require(path.join(PACKAGE_ROOT, 'windows', 'src', 'uninstall.js'));
 }
 
 function installWindows() {
@@ -270,6 +267,9 @@ function installWindows() {
 
   // 시작 메뉴 바로가기가 있어야 알림에 GitBell 이름과 아이콘이 보인다.
   runWindowsApp('--create-shortcut');
+  // 설정 → 앱 → 설치된 앱에서 지울 수 있게 등록한다.
+  const Uninstall = windowsUninstall();
+  Uninstall.registerUninstall({ exe, version: VERSION, sizeKB: Uninstall.folderSizeKB(WIN_INSTALL_DIR) });
 
   step(t('Launching GitBell', 'GitBell 실행'));
   spawn(exe, [WIN_APP_DIR], { detached: true, stdio: 'ignore' }).unref();
@@ -290,7 +290,8 @@ function installWindows() {
 function uninstallWindows(purge) {
   // 실행 중인 앱을 끝내고 로그인 시 실행·시작 메뉴 바로가기를 지운다.
   runWindowsApp('--uninstall');
-  removeWindowsIntegration();
+  // 앱이 망가져 스스로 지우지 못했을 때를 위해 설치기도 직접 지운다.
+  windowsUninstall().removeIntegration();
   removeDir(WIN_INSTALL_DIR);
   removeDir(`${WIN_INSTALL_DIR}.new`);
   step(t(`Removed ${WIN_INSTALL_DIR}`, `${WIN_INSTALL_DIR}을 지웠습니다`));

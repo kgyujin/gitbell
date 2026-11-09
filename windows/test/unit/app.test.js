@@ -405,3 +405,43 @@ test('파일 저장: 바꿔 넣기가 막히면(Windows 잠금) 직접 쓴다', 
   assert.deepEqual(store.loadSettings(), { refreshMinutes: 5 });
   assert.deepEqual(fs.readdirSync(dir), ['settings.json']);
 });
+
+// MARK: 설치된 앱 목록에서 제거
+
+test('제거: 설치 위치와 설치된 앱 목록 항목', () => {
+  const Uninstall = require('../../src/uninstall');
+  const env = { LOCALAPPDATA: 'C:\\Users\\John Smith\\AppData\\Local', APPDATA: 'C:\\Users\\John Smith\\AppData\\Roaming' };
+  const paths = Uninstall.installPaths(env);
+  assert.equal(paths.installDir, 'C:\\Users\\John Smith\\AppData\\Local\\Programs\\GitBell');
+  assert.equal(paths.appDir, `${paths.installDir}\\windows`);
+  assert.equal(paths.shortcut, 'C:\\Users\\John Smith\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\GitBell.lnk');
+  assert.equal(Uninstall.isStandardInstall(paths.appDir, env), true);
+  assert.equal(Uninstall.isStandardInstall(paths.appDir.toUpperCase(), env), true, '대소문자는 가리지 않는다');
+  assert.equal(Uninstall.isStandardInstall(ROOT, env), false, '개발 중인 소스 폴더는 지우지 않는다');
+
+  const exe = path.win32.join(paths.appDir, 'node_modules', 'electron', 'dist', 'electron.exe');
+  const entries = Object.fromEntries(Uninstall.uninstallEntries({ exe, version: '0.5.0', env, sizeKB: 123 }).map(([name, , data]) => [name, data]));
+  assert.equal(entries.DisplayName, 'GitBell');
+  assert.equal(entries.DisplayVersion, '0.5.0');
+  assert.equal(entries.UninstallString, `"${exe}" "${paths.appDir}" --uninstall-app`, '빈칸이 있는 경로도 따옴표로 감싼다');
+  assert.equal(entries.QuietUninstallString, `${entries.UninstallString} --quiet`);
+  assert.equal(entries.EstimatedSize, '123');
+});
+
+test('제거: 앱이 끝난 뒤 폴더를 지우는 cmd 명령', () => {
+  const { removalCommand } = require('../../src/uninstall');
+  const command = removalCommand(['C:\\A B\\GitBell', 'C:\\Data\\GitBell']);
+  assert.match(command, /^\/d \/s \/c "for \/l %i in \(1,1,30\) do \(/);
+  assert.ok(command.includes('rd /s /q "C:\\A B\\GitBell" 2>nul & rd /s /q "C:\\Data\\GitBell" 2>nul'));
+  assert.ok(command.includes('if not exist "C:\\A B\\GitBell" if not exist "C:\\Data\\GitBell" exit /b 0'));
+  assert.ok(!command.includes('timeout'), '숨은 창에서는 timeout이 동작하지 않는다');
+});
+
+test('제거: 폴더 크기(KB)', () => {
+  const { folderSizeKB } = require('../../src/uninstall');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitbell-size-'));
+  fs.mkdirSync(path.join(dir, 'sub'));
+  fs.writeFileSync(path.join(dir, 'a'), Buffer.alloc(1024));
+  fs.writeFileSync(path.join(dir, 'sub', 'b'), Buffer.alloc(1500));
+  assert.equal(folderSizeKB(dir), 3);
+});
