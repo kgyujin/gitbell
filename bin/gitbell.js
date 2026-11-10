@@ -344,6 +344,8 @@ ${bold('GitBell')} ${dim('v' + VERSION)}
 
 ${[
     [RUN, t('build and install (or update)', '빌드하고 설치(또는 업데이트)')],
+    // npx는 예전에 받은 버전을 다시 쓸 수 있어, 업데이트는 @latest를 붙여야 확실하다.
+    [`${RUN}@latest`, t('update to the latest version', '최신 버전으로 업데이트')],
     [`${RUN} uninstall`, t('remove the app', '앱 지우기')],
     [`${RUN} uninstall --purge`, t('remove the app, settings and token', '앱·설정·토큰 모두 지우기')],
   ].map(([command, text]) => `  ${bold(command.padEnd(46))}${text}`).join('\n')}
@@ -370,6 +372,7 @@ function main(argv) {
     case 'help':
       return help();
     default:
+      console.error(`\n${t('Unknown command:', '알 수 없는 명령:')} ${command}`);
       help();
       process.exit(1);
   }

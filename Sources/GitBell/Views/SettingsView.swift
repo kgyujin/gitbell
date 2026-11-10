@@ -222,19 +222,36 @@ private struct AccountSection: View {
                     LinkButton(title: L10n.string("Remove saved token")) { model.removeSavedToken() }
                 }
             }
-            if model.tokenSource != .keychain && model.tokenSource != .githubCLI {
+            if isExpired {
+                // 만료된 토큰을 여기서 바로 바꿀 수 있게 한다. 저장한 토큰이 GitHub CLI보다 먼저 쓰이므로
+                // CLI 로그인이 만료됐을 때도 새 토큰을 붙여넣으면 바로 이어진다.
+                Text(model.tokenSource == .githubCLI
+                     ? L10n.string("Run gh auth login again, or paste a new token below.")
+                     : L10n.string("Paste a new token below."))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 24)
+            }
+            if model.tokenSource == nil || isExpired {
                 TokenField(token: $token) { model.saveToken(token); token = "" }
             }
         }
         .padding(.vertical, 8)
     }
 
-    private var isConnected: Bool { model.tokenSource != nil && model.problem != .unauthorized }
+    private var isExpired: Bool { model.tokenSource != nil && model.problem == .unauthorized }
+    private var isConnected: Bool { model.tokenSource != nil && !isExpired }
     private var statusSymbol: String { isConnected ? "checkmark.circle.fill" : "xmark.circle.fill" }
     private var statusColor: Color { isConnected ? .green : .red }
 
     private var statusText: String {
         let login = model.state.me.isEmpty ? "" : " · @\(model.state.me)"
+        if isExpired {
+            return model.tokenSource == .githubCLI
+                ? L10n.string("The GitHub CLI login has expired.")
+                : L10n.string("The saved token is invalid or expired.")
+        }
         switch model.tokenSource {
         case .githubCLI: return L10n.string("Connected with GitHub CLI") + login
         case .keychain: return L10n.string("Connected with a personal access token") + login
@@ -464,6 +481,7 @@ private struct SegmentChip: View {
                     .fill(isSelected ? Color.accentColor : Color.primary.opacity(0.07)))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

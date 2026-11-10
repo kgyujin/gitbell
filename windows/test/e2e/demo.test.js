@@ -47,18 +47,18 @@ test('데모 패널: 목록·필터·검색·정렬·우클릭·설정', async (
 
   // 정렬: 저장소별
   await window.locator('[data-ui="sortMenu"]').click();
-  await window.locator('#menu').getByRole('button', { name: 'By repository' }).click();
+  await window.locator('#menu').getByRole('menuitemradio', { name: 'By repository' }).click();
   await window.waitForSelector('[data-section="repository:acme/web"]');
   assert.deepEqual(await window.locator('.section-header .plain').allTextContents(), ['web', 'api', 'design-system']);
   await screenshot(window, 'demo-by-repository');
 
   // 저장소 하나 읽음 표시
-  await window.locator('[data-section="repository:acme/web"]').getByRole('button', { name: 'Mark as read' }).click();
+  await window.locator('[data-section="repository:acme/web"] .section-header').getByRole('button', { name: 'Mark as read' }).click();
   await window.waitForFunction(() => document.querySelector('.header .count-badge').textContent === '1');
 
   // 우클릭 메뉴로 저장소 숨기기 → 설정의 숨긴 저장소에서 다시 보이기
   await window.locator('.row-item', { hasText: 'Button contrast' }).click({ button: 'right' });
-  await window.locator('#menu').getByRole('button', { name: 'Hide design-system' }).click();
+  await window.locator('#menu').getByRole('menuitem', { name: 'Hide design-system' }).click();
   await window.waitForFunction(() => !document.querySelector('[data-section="repository:acme/design-system"]'));
   assert.equal(await rows(window).count(), 6);
 
@@ -123,5 +123,100 @@ test('데모 패널: 한국어와 어두운 테마', async (t) => {
   await window.waitForSelector('#settings:not([hidden])');
   assert.ok(await window.getByText('트레이 아이콘에 안 읽은 수 표시').isVisible());
   await screenshot(window, 'demo-ko-settings');
+  assert.deepEqual(errors, []);
+});
+
+test('데모 패널: 고르기 메뉴를 키보드로 쓴다', async (t) => {
+  const { app, window, errors } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  const focused = () => window.evaluate(() => {
+    const element = document.activeElement;
+    return { text: element.textContent.trim(), ui: element.dataset.ui || null, checked: element.getAttribute('aria-checked') };
+  });
+
+  // 정렬 메뉴: Enter로 열면 골라진 항목에 초점이 가고, 화살표로 옮겨 Enter로 고른다.
+  const sort = window.locator('[data-ui="sortMenu"]');
+  await sort.focus();
+  await window.keyboard.press('Enter');
+  await window.waitForSelector('#menu:not([hidden])');
+  assert.equal(await sort.getAttribute('aria-expanded'), 'true');
+  assert.deepEqual(await focused(), { text: 'Newest', ui: null, checked: 'true' });
+  await window.keyboard.press('ArrowDown');
+  assert.equal((await focused()).text, 'By repository');
+  await window.keyboard.press('ArrowUp');
+  await window.keyboard.press('ArrowUp');
+  assert.equal((await focused()).text, 'Unread first', '위로 끝까지 가면 맨 아래로 돈다');
+  await window.keyboard.press('ArrowUp');
+  await window.keyboard.press('Enter');
+  await window.waitForSelector('[data-section="repository:acme/web"]');
+  assert.equal(await window.locator('#menu').isHidden(), true);
+  assert.equal((await focused()).ui, 'sortMenu', '고르면 초점이 메뉴 버튼으로 돌아온다');
+  assert.equal(await window.locator('[data-ui="sortMenu"]').getAttribute('aria-expanded'), 'false');
+
+  // Esc로 닫으면 초점이 메뉴 버튼으로 돌아온다.
+  await window.keyboard.press('Enter');
+  await window.waitForSelector('#menu:not([hidden])');
+  await window.keyboard.press('Escape');
+  assert.equal(await window.locator('#menu').isHidden(), true);
+  assert.equal((await focused()).ui, 'sortMenu');
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true,
+    '메뉴만 닫히고 패널은 그대로');
+
+  // 항목에서 Shift+F10을 누르면 그 항목의 메뉴가 열린다.
+  await window.locator('.row-item').first().focus();
+  await window.keyboard.press('Shift+F10');
+  await window.waitForSelector('#menu:not([hidden])');
+  assert.equal((await focused()).text, 'Open in browser');
+  await window.keyboard.press('Escape');
+  assert.equal(await window.evaluate(() => document.activeElement.classList.contains('row-item')), true);
+
+  // 칩을 Enter로 눌러 목록을 다시 그려도 초점이 그 칩에 남는다(이어서 Tab·Enter를 쓸 수 있게).
+  await window.getByRole('button', { name: 'Unread', exact: true }).focus();
+  await window.keyboard.press('Enter');
+  await window.waitForFunction(() => document.querySelectorAll('.row-item').length === 3);
+  assert.equal(await window.evaluate(() => [document.activeElement.textContent.trim(), document.activeElement.getAttribute('aria-pressed')].join()),
+    'Unread,true');
+  assert.deepEqual(errors, []);
+});
+
+test('데모 패널: 열지 않고 읽음 표시·묶음 읽음·되돌리기', async (t) => {
+  const { app, window, errors } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  const badge = () => window.locator('.header .count-badge').textContent().catch(() => '0');
+
+  // 안 읽은 줄에 마우스를 올리면 '읽음 표시' 단추가 나오고, 누르면 페이지를 열지 않고 읽음이 된다.
+  const firstWrap = window.locator('.row-wrap').first();
+  const readButton = firstWrap.locator('.row-read');
+  assert.equal(await readButton.evaluate((el) => getComputedStyle(el).opacity), '0', '평소에는 숨긴다');
+  await firstWrap.hover();
+  assert.equal(await readButton.evaluate((el) => getComputedStyle(el).opacity), '1');
+  await readButton.click();
+  await window.waitForFunction(() => document.querySelector('.header .count-badge').textContent === '2');
+  assert.equal(await window.locator('.undo-bar').count(), 0, '한 항목은 되돌리기를 띄우지 않는다');
+  await screenshot(window, 'demo-row-read');
+
+  // 날짜 묶음(오늘)에도 '읽음 표시'가 있고, 누르면 되돌리기가 잠시 보인다.
+  const todayHeader = window.locator('section').first().locator('.section-header');
+  assert.equal(await todayHeader.locator('.secondary').textContent(), 'Today');
+  await todayHeader.getByRole('button', { name: 'Mark as read' }).click();
+  await window.waitForSelector('.undo-bar');
+  assert.equal(await window.locator('.header .count-badge').count(), 0, '안 읽은 것이 없다');
+  assert.match(await window.locator('.undo-bar').textContent(), /Marked 2 items as read/);
+  await screenshot(window, 'demo-undo');
+
+  // Ctrl+Z로 되돌린다.
+  await window.locator('.row-item').first().focus();
+  await window.keyboard.press('Control+z');
+  await window.waitForFunction(() => document.querySelector('.header .count-badge')?.textContent === '2');
+  assert.equal(await window.locator('.undo-bar').count(), 0);
+
+  // 단추로도 되돌린다.
+  await window.getByRole('button', { name: 'Mark everything shown as read' }).click();
+  await window.waitForSelector('.undo-bar');
+  await window.locator('.undo-bar').getByRole('button', { name: 'Undo' }).click();
+  await window.waitForFunction(() => document.querySelector('.header .count-badge')?.textContent === '2');
+  assert.equal(await badge(), '2');
   assert.deepEqual(errors, []);
 });

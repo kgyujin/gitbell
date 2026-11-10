@@ -131,6 +131,9 @@ final class AppModel: ObservableObject {
 
     func simulateUpdate(_ version: String) { availableUpdate = version }
 
+    /// 기록이 있는 채로 토큰이 만료된 화면(문제 안내 + 설정의 새 토큰 입력칸).
+    func simulateExpiredToken() { problem = .unauthorized }
+
     // MARK: 확인 주기
 
     func start() {
@@ -259,22 +262,73 @@ final class AppModel: ObservableObject {
 
     func open(_ event: ActivityEvent) {
         Self.openHTTPS(event.url)
-        markRead(event.id)
+        markOpened(event.id)
     }
 
+    /// 항목(또는 그 알림)을 열었을 때. 같은 PR·이슈의 다른 안 읽은 항목도 함께 읽음이 된다.
+    func markOpened(_ id: String) {
+        let before = unreadIDs
+        state.markThreadRead(id)
+        saveState()
+        dismissRead(before)
+    }
+
+    /// id가 nil이면 지금 화면에 보이는 항목을 모두 읽음으로 바꾼다(필터·숨긴 저장소 반영, 되돌릴 수 있다).
     func markRead(_ id: String? = nil) {
-        if id == nil {
-            // '모두 읽음'은 지금 화면에 보이는 항목에만 적용한다(필터·숨긴 저장소 반영).
-            for event in effectiveQuery.filter(visibleHistory) where event.isUnread { state.markRead(event.id) }
-        } else {
-            state.markRead(id)
-        }
+        guard let id else { return markRead(events: effectiveQuery.filter(visibleHistory)) }
+        let before = unreadIDs
+        state.markRead(id)
         saveState()
+        dismissRead(before)
     }
 
-    func markRead(repo: String) {
-        state.markRead(repo: repo)
+    /// 여러 항목(묶음 하나, 또는 보이는 전체)을 읽음으로 바꾸고 잠시 '되돌리기'를 보인다.
+    func markRead(events: [ActivityEvent]) {
+        let ids = events.filter(\.isUnread).map(\.id)
+        guard !ids.isEmpty else { return }
+        let before = unreadIDs
+        state.markRead(ids: Set(ids))
         saveState()
+        dismissRead(before)
+        offerUndo(ids)
+    }
+
+    // MARK: 되돌리기
+
+    /// 방금 여러 항목을 읽음으로 바꾼 기록. 잘못 눌렀을 때 되돌릴 수 있게 잠시 남긴다.
+    struct ReadUndo: Equatable {
+        let ids: [String]
+        let stamp = UUID()
+    }
+
+    @Published private(set) var readUndo: ReadUndo?
+    /// '되돌리기'를 보이는 시간.
+    static let undoSeconds: Double = 8
+
+    private func offerUndo(_ ids: [String]) {
+        let undo = ReadUndo(ids: ids)
+        readUndo = undo
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.undoSeconds))
+            if self?.readUndo == undo { self?.readUndo = nil }
+        }
+    }
+
+    func undoMarkRead() {
+        guard let undo = readUndo else { return }
+        state.markUnread(ids: Set(undo.ids))
+        saveState()
+        readUndo = nil
+    }
+
+    private var unreadIDs: Set<String> { Set(state.history.filter(\.isUnread).map(\.id)) }
+
+    /// GitBell에서 읽은 항목의 알림을 알림 센터에서도 지운다(이미 본 알림이 쌓이지 않게).
+    /// 보이는 안 읽은 항목이 하나도 없으면 여러 항목을 묶은 요약 알림까지 지운다.
+    private func dismissRead(_ before: Set<String>) {
+        let read = before.subtracting(unreadIDs)
+        guard !read.isEmpty else { return }
+        Notifier.shared.removeDelivered(ids: Array(read), includeSummaries: unreadCount == 0)
     }
 
     func markUnread(_ id: String) {

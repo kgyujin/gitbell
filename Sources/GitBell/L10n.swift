@@ -113,9 +113,19 @@ enum L10n {
         }
     }
 
+    /// 날짜·시간 표기에 쓸 언어. 화면 문구와 같은 언어로 맞춘다.
+    /// 화면은 한국어·영어만 있어, 예를 들어 독일어 Mac에서는 문구가 영어인데 '3분 전'만 독일어로 섞여 보였다.
+    /// 시스템 언어가 화면 언어와 같으면 Locale.current를 그대로 써 24시간제 같은 개인 설정을 지킨다.
+    static let locale: Locale = {
+        let language = Bundle.main.preferredLocalizations.first ?? "en"
+        if Locale.current.language.languageCode?.identifier == language { return .current }
+        return Locale(identifier: Locale.current.region.map { "\(language)_\($0.identifier)" } ?? language)
+    }()
+
     static func relative(_ date: Date) -> String {
         if Date().timeIntervalSince(date) < 60 { return string("now") }
         let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
     }
@@ -125,12 +135,14 @@ enum L10n {
         if calendar.isDateInToday(date) { return string("Today") }
         if calendar.isDateInYesterday(date) { return string("Yesterday") }
         let formatter = DateFormatter()
+        formatter.locale = locale
         formatter.setLocalizedDateFormatFromTemplate("MMMMdEEE")
         return formatter.string(from: date)
     }
 
     static func clock(_ date: Date) -> String {
         let formatter = DateFormatter()
+        formatter.locale = locale
         formatter.timeStyle = .short
         return formatter.string(from: date)
     }

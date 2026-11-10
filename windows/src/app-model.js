@@ -13,6 +13,8 @@ const KINDS = Object.values(EventKind);
 const { isBot } = require('./core/event-builder');
 
 const REFRESH_CHOICES = [1, 2, 5, 10, 15];
+/** 여러 항목을 읽음으로 바꾼 뒤 '되돌리기'를 보이는 시간. */
+const UNDO_MS = 8000;
 const UPDATE_COMMAND = 'npx gitbell@latest';
 const URLS = Object.freeze({
   notifications: 'https://github.com/notifications',
@@ -59,7 +61,8 @@ class AppModel {
    * @param {{loadState(): any, saveState(s): void, loadSettings(): any, saveSettings(s): void}} deps.store
    * @param {{resolve(): Promise<{value: string, source: 'saved'|'githubCLI'}|null>, save(t: string): boolean, remove(): void}} deps.tokens
    * @param {(token: string) => {get(path: string): Promise<any>}} deps.createAPI
-   * @param {{post(events: object[], playsSound: boolean): void, postTest(playsSound: boolean): void}} deps.notifier
+   * @param {{post(events: object[], playsSound: boolean): void, postTest(playsSound: boolean): void,
+   *   dismiss?(ids: string[], includeSummaries: boolean): void}} deps.notifier
    * @param {{openURL(url: string): void, copyText(text: string): void, getLaunchAtLogin(): boolean,
    *          setLaunchAtLogin(on: boolean): void, openNotificationSettings(): void, quit(): void}} deps.system
    * @param {ReturnType<import('./l10n').createL10n>} deps.l10n
@@ -81,6 +84,8 @@ class AppModel {
     this.showingSettings = false;
     this.showingSearch = false;
     this.tokenSaveFailed = false;
+    /** 방금 여러 항목을 읽음으로 바꾼 기록(되돌리기용). */
+    this.readUndo = null;
     this.timer = null;
     this.checks = 0;
     this.demo = false;
@@ -251,24 +256,88 @@ class AppModel {
     const event = this.findEvent(id);
     if (!event) return;
     this.deps.system.openURL(event.url);
-    this.markRead(id);
+    this.markOpened(id);
   }
 
-  /** id가 없으면 지금 화면에 보이는 항목만 읽음으로 바꾼다(필터·숨긴 저장소 반영). */
-  markRead(id) {
-    if (id == null) {
-      for (const event of Query.filter(this.effectiveQuery(), this.visibleHistory())) {
-        if (event.isUnread) WatchState.markRead(this.state, event.id);
-      }
-    } else {
-      WatchState.markRead(this.state, id);
-    }
+  /** 항목(또는 그 알림)을 열었을 때. 같은 PR·이슈의 다른 안 읽은 항목도 함께 읽음이 된다. */
+  markOpened(id) {
+    const before = this.unreadIds();
+    WatchState.markThreadRead(this.state, id);
     this.saveState();
     this.emit();
+    this.dismissRead(before);
   }
 
+  /** 지금 안 읽은 항목 id. 읽음으로 바꾼 뒤 알림 센터에서 지울 항목을 가리는 데 쓴다. */
+  unreadIds() {
+    return new Set(this.state.history.filter((event) => event.isUnread).map((event) => event.id));
+  }
+
+  /**
+   * GitBell에서 읽은 항목의 알림을 알림 센터에서도 지운다(이미 본 알림이 쌓이지 않게).
+   * 보이는 안 읽은 항목이 하나도 없으면 여러 항목을 묶은 요약 알림까지 지운다.
+   */
+  dismissRead(before) {
+    const after = this.unreadIds();
+    const ids = [...before].filter((id) => !after.has(id));
+    if (ids.length && this.deps.notifier.dismiss) this.deps.notifier.dismiss(ids, this.unreadCount === 0);
+  }
+
+  /** id가 없으면 지금 화면에 보이는 항목을 모두 읽음으로 바꾼다(필터·숨긴 저장소 반영, 되돌릴 수 있다). */
+  markRead(id) {
+    if (id == null) return this.markEventsRead(this.visibleFiltered());
+    const before = this.unreadIds();
+    WatchState.markRead(this.state, id);
+    this.saveState();
+    this.emit();
+    this.dismissRead(before);
+  }
+
+  /** 저장소 하나의 보이는 항목을 읽음으로 바꾼다. */
   markRepoRead(repo) {
-    WatchState.markRepoRead(this.state, repo);
+    this.markEventsRead(this.visibleFiltered().filter((event) => event.repo === repo));
+  }
+
+  /** 화면의 묶음 하나(날짜·저장소·안 읽음)를 읽음으로 바꾼다. */
+  markSectionRead(sectionId) {
+    const section = Query.sections(this.effectiveQuery(), this.visibleHistory())
+      .find((candidate) => Query.sectionID(candidate.key) === sectionId);
+    if (section) this.markEventsRead(section.events);
+  }
+
+  visibleFiltered() {
+    return Query.filter(this.effectiveQuery(), this.visibleHistory());
+  }
+
+  /** 여러 항목을 읽음으로 바꾸고 잠시 '되돌리기'를 보인다. */
+  markEventsRead(events) {
+    const ids = events.filter((event) => event.isUnread).map((event) => event.id);
+    if (ids.length === 0) return;
+    const before = this.unreadIds();
+    WatchState.markReadIds(this.state, ids);
+    this.saveState();
+    this.offerUndo(ids);
+    this.emit();
+    this.dismissRead(before);
+  }
+
+  /** 잘못 눌렀을 때 되돌릴 수 있게 방금 읽음으로 바꾼 항목을 잠시(undoMs) 남긴다. */
+  offerUndo(ids) {
+    const undo = { ids };
+    this.readUndo = undo;
+    const timer = setTimeout(() => {
+      if (this.readUndo !== undo) return;
+      this.readUndo = null;
+      this.emit();
+    }, this.deps.undoMs ?? UNDO_MS);
+    // 테스트나 앱 종료를 이 타이머가 붙잡지 않게 한다.
+    if (timer.unref) timer.unref();
+  }
+
+  undoMarkRead() {
+    if (!this.readUndo) return;
+    WatchState.markUnreadIds(this.state, this.readUndo.ids);
+    this.readUndo = null;
     this.saveState();
     this.emit();
   }
@@ -440,12 +509,19 @@ class AppModel {
     const visible = this.visibleHistory();
     const filtered = Query.filter(query, visible);
     const groupedByRepo = query.sort === Query.SortMode.byRepository;
-    const isConnected = this.tokenSource != null && !(this.problem && this.problem.type === 'unauthorized');
+    const isExpired = this.tokenSource != null && this.problem != null && this.problem.type === 'unauthorized';
+    const isConnected = this.tokenSource != null && !isExpired;
     const login = this.state.me ? ` · @${this.state.me}` : '';
-    const accountText = {
-      githubCLI: l10n.t('Connected with GitHub CLI') + login,
-      saved: l10n.t('Connected with a personal access token') + login,
-    }[this.tokenSource] || l10n.t('Not connected');
+    const accountText = isExpired
+      ? l10n.t(this.tokenSource === 'githubCLI' ? 'The GitHub CLI login has expired.' : 'The saved token is invalid or expired.')
+      : {
+        githubCLI: l10n.t('Connected with GitHub CLI') + login,
+        saved: l10n.t('Connected with a personal access token') + login,
+      }[this.tokenSource] || l10n.t('Not connected');
+    // 만료된 토큰을 설정에서 바로 바꿀 수 있게 한다. 저장한 토큰이 GitHub CLI보다 먼저 쓰이므로
+    // CLI 로그인이 만료됐을 때도 새 토큰을 붙여넣으면 바로 이어진다.
+    const accountHint = !isExpired ? ''
+      : l10n.t(this.tokenSource === 'githubCLI' ? 'Run gh auth login again, or paste a new token below.' : 'Paste a new token below.');
 
     return {
       version: this.deps.version,
@@ -492,8 +568,14 @@ class AppModel {
         ? l10n.format('Checked %@ · %lld repositories', l10n.clock(this.state.lastChecked), this.state.checkedRepos.length)
         : l10n.t('Checking…'),
       availableUpdate: this.availableUpdate,
-      account: { isConnected, text: accountText, canRemove: this.tokenSource === 'saved', needsToken: this.tokenSource == null },
+      account: {
+        isConnected, text: accountText, hint: accountHint,
+        canRemove: this.tokenSource === 'saved', needsToken: this.tokenSource == null || isExpired,
+      },
+      /** 문제 안내 옆에 '설정 열기'를 붙일지(토큰 문제는 설정에서 고친다). */
+      problemOpensSettings: isExpired,
       tokenSaveFailed: this.tokenSaveFailed,
+      readUndo: this.readUndo ? { text: l10n.format('Marked %lld items as read', this.readUndo.ids.length) } : null,
       settings: {
         refreshMinutes: this.settings.refreshMinutes,
         refreshChoices: REFRESH_CHOICES,

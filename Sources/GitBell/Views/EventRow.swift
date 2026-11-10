@@ -2,6 +2,7 @@
 // [종류]  저장소 #번호 (또는 ⎇ 브랜치)                       시간
 //         본문 (PR 제목·댓글·커밋 제목, 최대 2줄)
 //         종류 이름 · (아바타) 사람 [봇]                         ●
+// 안 읽은 줄에 마우스를 올리면 ● 자리에 '읽음 표시' 단추가 나온다(열지 않고 읽음으로 바꾸기).
 
 import GitBellCore
 import SwiftUI
@@ -10,6 +11,8 @@ struct EventRow: View {
     let event: ActivityEvent
     /// 저장소별로 묶어 보일 때는 묶음 제목에 저장소가 있어 줄마다 다시 쓰지 않는다.
     var showsRepository = true
+    /// 열지 않고 읽음으로 바꾸기. 없으면 단추를 보이지 않는다.
+    var markRead: (() -> Void)?
     let action: () -> Void
     @State private var hovering = false
 
@@ -39,8 +42,27 @@ struct EventRow: View {
             )
         }
         .buttonStyle(.plain)
+        // 단추를 줄(Button) 안에 넣으면 줄이 누름을 가져가서, 줄 위에 따로 얹는다.
+        .overlay(alignment: .bottomTrailing) {
+            if hovering, event.isUnread, let markRead {
+                Button(action: markRead) {
+                    Image(systemName: "checkmark.circle")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(.tint)
+                        .frame(width: 22, height: 22)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(L10n.string("Mark as read"))
+                .padding(.trailing, 9)
+                .padding(.bottom, 5)
+            }
+        }
+        // 단추 위에 있어도 줄에 마우스가 있는 것으로 보도록 overlay 뒤에 단다.
         .onHover { hovering = $0 }
         .help(L10n.title(event))
+        // VoiceOver에서도 열지 않고 읽음으로 바꿀 수 있게 한다.
+        .accessibilityAction(named: Text("Mark as read")) { if event.isUnread { markRead?() } }
     }
 
     /// 저장소 이름은 가운데를 줄여 앞뒤가 보이게 하고, 시간은 항상 다 보인다.
@@ -94,7 +116,8 @@ struct EventRow: View {
                 }
             }
             Spacer(minLength: 6)
-            if event.isUnread {
+            // 마우스를 올리면 이 자리에 '읽음 표시' 단추가 겹쳐 나와 점은 숨긴다.
+            if event.isUnread && !(hovering && markRead != nil) {
                 Circle().fill(Color.accentColor).frame(width: 7, height: 7)
                     .accessibilityLabel(Text("Unread"))
             }
