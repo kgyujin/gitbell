@@ -17,6 +17,8 @@ let strings = {};
 let singular = {};
 let locale = 'en-US';
 let menuBuilder = null;
+/** 메뉴를 연 버튼(또는 항목). 메뉴를 닫으면 초점을 여기로 돌려준다. */
+let menuOpener = null;
 let copiedUpdate = false;
 
 const t = (key) => (Object.hasOwn(strings, key) ? strings[key] : key);
@@ -100,10 +102,10 @@ function renderFilters() {
         ${chip(t('Unread'), q.unreadOnly, actionAttrs('setQuery', { unreadOnly: !q.unreadOnly }), { symbol: 'dot', small: true })}
       </div>
       <div class="row small">
-        <button type="button" class="menu-chip${q.repo ? ' active' : ''}" data-ui="repoMenu" title="${esc(q.repo || view.repositoryTitle)}">
+        <button type="button" class="menu-chip${q.repo ? ' active' : ''}" data-ui="repoMenu" aria-haspopup="menu" aria-expanded="${openMenuName() === 'repoMenu'}" title="${esc(q.repo || view.repositoryTitle)}">
           ${icon('folder')}<span>${esc(shortened(view.repositoryTitle))}</span>${icon('chevronDown', 'chevron')}
         </button>
-        <button type="button" class="menu-chip${q.sort !== 'newest' ? ' active' : ''}" data-ui="sortMenu">
+        <button type="button" class="menu-chip${q.sort !== 'newest' ? ' active' : ''}" data-ui="sortMenu" aria-haspopup="menu" aria-expanded="${openMenuName() === 'sortMenu'}">
           ${icon('sort')}<span>${esc(view.sortTitle)}</span>${icon('chevronDown', 'chevron')}
         </button>
         <span class="spacer"></span>
@@ -115,7 +117,9 @@ function renderFilters() {
 
 function renderProblem() {
   if (!view.problemMessage) return '';
-  return `<div class="problem" role="status">${icon('warning', 'tint-orange')}<span>${esc(view.problemMessage)}</span></div>`;
+  const settings = view.problemOpensSettings
+    ? `<button type="button" class="link problem-action" ${actionAttrs('setShowingSettings', true)}>${esc(t('Open Settings'))}</button>` : '';
+  return `<div class="problem" role="status">${icon('warning', 'tint-orange')}<span>${esc(view.problemMessage)}</span>${settings}</div>`;
 }
 
 // MARK: - 목록
@@ -127,7 +131,7 @@ function renderList() {
         <button type="button" class="pill" ${actionAttrs('resetFilters')}>${esc(t('Reset filters'))}</button></div>`;
     }
     return `<div class="empty">${icon(view.isFirstLoad ? 'hourglass' : 'checkCircle', 'empty-icon')}
-      <strong>${esc(t(view.isFirstLoad ? 'Loading your GitHub activity…' : 'No activity in the last day'))}</strong>
+      <strong>${esc(t(view.isFirstLoad ? 'Loading your GitHub activity…' : 'No activity yet'))}</strong>
       ${view.isFirstLoad ? '' : `<span class="secondary">${esc(t('New pull requests, reviews, merges and commits will show up here.'))}</span>`}</div>`;
   }
   return `<div class="list" id="list">${view.sections.map(renderSection).join('')}</div>`;
@@ -138,12 +142,18 @@ function renderSection(section) {
   if (section.repo) {
     header = `<div class="section-header">${icon('folder', 'secondary')}
       <button type="button" class="plain" title="${esc(section.repo)}" ${actionAttrs('openLink', `repo:${section.repo}`)}>${esc(section.title)}</button>
-      <span class="tertiary">${section.count}</span><span class="spacer"></span>
-      ${section.unreadCount > 0 ? `<button type="button" class="link" ${actionAttrs('markRepoRead', section.repo)}>${esc(t('Mark as read'))}</button>` : ''}</div>`;
+      <span class="tertiary">${section.count}</span><span class="spacer"></span>${sectionMarkRead(section)}</div>`;
   } else {
-    header = `<div class="section-header"><span class="secondary">${esc(section.title)}</span><span class="tertiary">${section.count}</span></div>`;
+    header = `<div class="section-header"><span class="secondary">${esc(section.title)}</span><span class="tertiary">${section.count}</span>
+      <span class="spacer"></span>${sectionMarkRead(section)}</div>`;
   }
   return `<section data-section="${esc(section.id)}">${header}${section.events.map(renderRow).join('')}</section>`;
+}
+
+/** 저장소 묶음뿐 아니라 날짜·안 읽음 묶음도 한 번에 읽음으로 바꿀 수 있다(보이는 항목만, 되돌릴 수 있다). */
+function sectionMarkRead(section) {
+  if (section.unreadCount === 0) return '';
+  return `<button type="button" class="link" ${actionAttrs('markSectionRead', section.id)}>${esc(t('Mark as read'))}</button>`;
 }
 
 function renderRow(event) {
@@ -154,6 +164,7 @@ function renderRow(event) {
   const actor = event.actor ? `<span class="tertiary">·</span>${avatar}<span class="actor">${esc(event.actor)}</span>
     ${event.isBot ? `<span class="bot">${esc(t('bot'))}</span>` : ''}` : '';
   return `
+    <div class="row-wrap">
     <button type="button" class="row-item${event.isUnread ? ' unread' : ''}" data-event="${esc(event.id)}" title="${esc(event.title)}" ${actionAttrs('open', event.id)}>
       <span class="kind-badge tint-${tint}">${icon(symbol)}</span>
       <span class="row-text">
@@ -167,7 +178,16 @@ function renderRow(event) {
         <span class="meta"><span class="kind tint-${tint}">${esc(event.kindLabel)}</span>${actor}
           <span class="spacer"></span>${event.isUnread ? `<span class="unread-dot" role="img" aria-label="${esc(t('Unread'))}"></span>` : ''}</span>
       </span>
-    </button>`;
+    </button>
+    ${event.isUnread ? `<button type="button" class="row-read" title="${esc(t('Mark as read'))}" aria-label="${esc(t('Mark as read'))}" ${actionAttrs('markRead', event.id)}>${icon('checkCircle')}</button>` : ''}
+    </div>`;
+}
+
+/** 여러 항목을 읽음으로 바꾼 직후 잠시 보이는 '되돌리기'(Ctrl+Z). */
+function renderUndo() {
+  if (!view.readUndo) return '';
+  return `<div class="undo-bar" role="status">${icon('checkCircle', 'secondary')}<span>${esc(view.readUndo.text)}</span>
+    <span class="spacer"></span><button type="button" class="link strong" ${actionAttrs('undoMarkRead')}>${esc(t('Undo'))}</button></div>`;
 }
 
 function renderUpdate() {
@@ -263,6 +283,7 @@ function renderSettings() {
     <div class="setting-line">${icon(view.account.isConnected ? 'checkCircle' : 'x', `row-icon ${view.account.isConnected ? 'tint-green' : 'tint-red'}`)}
       <span>${esc(view.account.text)}</span><span class="spacer"></span>
       ${view.account.canRemove ? `<button type="button" class="link" ${actionAttrs('removeSavedToken')}>${esc(t('Remove saved token'))}</button>` : ''}</div>
+    ${view.account.hint ? `<p class="secondary small account-hint">${esc(view.account.hint)}</p>` : ''}
     ${view.account.needsToken ? '<div data-slot="token"></div>' : ''}`;
 
   const pref = (symbol, title, key, subtitle = '', disabled = off) => switchRow({
@@ -304,7 +325,7 @@ function renderSettings() {
 
   const general = [
     `<div class="setting-line">${icon('refresh', 'row-icon secondary')}<span>${esc(t('Check every'))}</span><span class="spacer"></span>
-      ${s.refreshChoices.map((minutes) => `<button type="button" class="segment${s.refreshMinutes === minutes ? ' selected' : ''}" ${actionAttrs('setRefreshMinutes', minutes)}>${esc(format('%lld min', minutes))}</button>`).join('')}</div>`,
+      ${s.refreshChoices.map((minutes) => `<button type="button" class="segment${s.refreshMinutes === minutes ? ' selected' : ''}" aria-pressed="${s.refreshMinutes === minutes}" ${actionAttrs('setRefreshMinutes', minutes)}>${esc(format('%lld min', minutes))}</button>`).join('')}</div>`,
     '<div class="divider"></div>',
     switchRow({ symbol: 'power', title: t('Open at login'), on: s.launchAtLogin, action: 'setLaunchAtLogin', args: [!s.launchAtLogin] }),
   ];
@@ -326,8 +347,10 @@ function renderSettings() {
 
 // MARK: - 고르기 메뉴(저장소·정렬·우클릭)
 
-function optionRow({ title, subtitle = '', detail = '', unread = 0, selected = false, symbol = '', attrs = '' }) {
-  return `<button type="button" class="option" ${attrs}>
+function optionRow({ title, subtitle = '', detail = '', unread = 0, selected = null, symbol = '', attrs = '' }) {
+  // 고르는 메뉴(저장소·정렬)는 골라진 것을 화면 읽기 프로그램도 알 수 있게 한다.
+  const role = selected == null ? 'role="menuitem"' : `role="menuitemradio" aria-checked="${selected}"`;
+  return `<button type="button" class="option" tabindex="-1" ${role} ${attrs}>
     <span class="check">${selected ? icon('check') : ''}</span>
     ${symbol ? icon(symbol, 'secondary') : ''}
     <span class="option-text"><span class="${selected ? 'strong' : ''}">${esc(title)}</span>${subtitle ? `<span class="subtitle">${esc(subtitle)}</span>` : ''}</span>
@@ -365,7 +388,13 @@ const menus = {
   repoContextMenu: (repo) => optionRow({ title: t('Hide this repository'), attrs: actionAttrs('hideRepository', repo) }),
 };
 
-function openMenu(name, arg, anchor) {
+function openMenuName() {
+  const menu = $('#menu');
+  return menu && !menu.hidden ? menu.dataset.menu : null;
+}
+
+function openMenu(name, arg, anchor, opener = null) {
+  menuOpener = opener;
   menuBuilder = () => menus[name](arg);
   const html = menuBuilder();
   if (html == null) return closeMenu();
@@ -383,17 +412,80 @@ function openMenu(name, arg, anchor) {
   const below = anchor.y;
   const room = document.documentElement.clientHeight - 8;
   menu.style.top = `${Math.max(8, below + height > room ? room - height : below)}px`;
+  if (opener && opener.hasAttribute('aria-haspopup')) opener.setAttribute('aria-expanded', 'true');
+  // 키보드로도 바로 고를 수 있게 골라진 항목(없으면 첫 항목)에 초점을 둔다.
+  const first = menu.querySelector('.option[aria-checked="true"]') || menu.querySelector('.option');
+  if (first) first.focus();
 }
 
-function closeMenu() {
+/** 메뉴를 닫는다. returnFocus면 메뉴를 연 버튼으로 초점을 돌려준다(Esc로 닫을 때). */
+function closeMenu({ returnFocus = false } = {}) {
+  const wasOpen = !$('#menu').hidden;
   menuBuilder = null;
   $('#menu').hidden = true;
+  const opener = findAgain(menuOpener);
+  menuOpener = null;
+  if (opener) {
+    if (opener.hasAttribute('aria-expanded')) opener.setAttribute('aria-expanded', 'false');
+    if (returnFocus && wasOpen) opener.focus();
+  }
+}
+
+/** 화면을 다시 그리면 버튼이 새로 만들어지므로, 같은 버튼을 이름표(data-ui·data-event)로 다시 찾는다. */
+function findAgain(element) {
+  if (!element || element.isConnected) return element;
+  if (element.dataset.ui) return document.querySelector(`[data-ui="${CSS.escape(element.dataset.ui)}"]`);
+  if (element.dataset.event) return document.querySelector(`[data-event="${CSS.escape(element.dataset.event)}"]`);
+  return null;
+}
+
+/** 열린 메뉴 안에서 위·아래 화살표, Home·End로 항목을 옮겨 다닌다. */
+function moveMenuFocus(key) {
+  const options = [...$('#menu').querySelectorAll('.option')];
+  if (options.length === 0) return;
+  const index = options.indexOf(document.activeElement);
+  let next;
+  if (key === 'ArrowDown') next = index < 0 ? 0 : (index + 1) % options.length;
+  else if (key === 'ArrowUp') next = index <= 0 ? options.length - 1 : index - 1;
+  else if (key === 'Home') next = 0;
+  else next = options.length - 1;
+  options[next].focus();
 }
 
 // MARK: - 그리기
 
+/**
+ * 다시 그리기 전에 키보드 초점이 있던 버튼을 기억할 이름표.
+ * 화면을 innerHTML로 통째로 다시 그려, 그대로 두면 칩을 Enter로 누를 때마다 초점이 사라졌다.
+ * data-ui·data-event는 그대로 찾고, 나머지는 같은 동작(data-action) 버튼 중 몇 번째인지로 찾는다.
+ */
+function focusKey() {
+  const element = document.activeElement;
+  if (!element || element === document.body || element.closest('#menu') || element.id) return null;
+  if (element.dataset.ui) return `[data-ui="${CSS.escape(element.dataset.ui)}"]`;
+  // 줄의 '읽음 표시' 단추는 누르면 사라지므로 그 줄로 초점을 옮긴다.
+  if (element.classList.contains('row-read')) {
+    const row = element.parentElement.querySelector('[data-event]');
+    if (row) return `[data-event="${CSS.escape(row.dataset.event)}"]`;
+  }
+  if (element.dataset.event) return `[data-event="${CSS.escape(element.dataset.event)}"]`;
+  const action = element.dataset.action;
+  if (!action) return null;
+  const same = [...document.querySelectorAll(`[data-action="${CSS.escape(action)}"]`)];
+  return { action, index: same.indexOf(element) };
+}
+
+function restoreFocus(key) {
+  if (!key || (document.activeElement && document.activeElement !== document.body)) return;
+  const element = typeof key === 'string'
+    ? document.querySelector(key)
+    : document.querySelectorAll(`[data-action="${CSS.escape(key.action)}"]`)[key.index];
+  if (element) element.focus();
+}
+
 function render() {
   if (!view) return;
+  const focused = focusKey();
   const list = $('#list');
   const scrollTop = list ? list.scrollTop : 0;
   const settingsScroll = $('#settingsScroll');
@@ -409,15 +501,22 @@ function render() {
     renderSearch();
     $('#body').innerHTML = view.showsOnboarding
       ? renderProblem() + renderOnboarding()
-      : renderFilters() + renderProblem() + renderList() + renderUpdate() + renderFooter();
+      : renderFilters() + renderProblem() + renderList() + renderUndo() + renderUpdate() + renderFooter();
     const newList = $('#list');
     if (newList) newList.scrollTop = scrollTop;
   }
   placeTokenField();
+  restoreFocus(focused);
   if (menuBuilder && !$('#menu').hidden) {
     const html = menuBuilder();
     if (html == null) closeMenu();
-    else $('#menu').innerHTML = html;
+    else {
+      // 새 자료가 와서 메뉴를 다시 그려도 키보드 초점이 있던 항목을 지킨다.
+      const menu = $('#menu');
+      const focused = [...menu.querySelectorAll('.option')].indexOf(document.activeElement);
+      menu.innerHTML = html;
+      if (focused >= 0) menu.querySelectorAll('.option')[focused]?.focus();
+    }
   }
   requestAnimationFrame(reportSize);
 }
@@ -462,33 +561,65 @@ document.addEventListener('click', (event) => {
     if (ui === 'repoMenu' || ui === 'sortMenu') {
       if (!$('#menu').hidden && $('#menu').dataset.menu === ui) return closeMenu();
       const rect = target.getBoundingClientRect();
-      openMenu(ui, null, { x: rect.left, y: rect.bottom + 4 });
+      openMenu(ui, null, { x: rect.left, y: rect.bottom + 4 }, target);
     }
     return;
   }
   const args = JSON.parse(target.dataset.args || '[]');
-  if (insideMenu) closeMenu();
+  if (insideMenu) closeMenu({ returnFocus: true });
   bridge.action(target.dataset.action, ...args);
 });
 
+/** 항목(또는 저장소 메뉴의 저장소)의 우클릭 메뉴를 연다. point가 없으면 그 항목 바로 아래에 연다. */
+function openContextMenu(target, point = null) {
+  const row = target.closest('[data-event]');
+  const repo = target.closest('[data-repo-menu]');
+  const source = row || repo;
+  if (!source) return false;
+  let anchor = point;
+  if (!anchor) {
+    const rect = source.getBoundingClientRect();
+    anchor = { x: rect.left + 24, y: rect.bottom - 4 };
+  }
+  // 저장소 메뉴 안에서 연 메뉴는 원래 메뉴를 대신하므로 초점을 돌려줄 곳이 없다.
+  if (row) openMenu('eventMenu', row.dataset.event, anchor, row);
+  else openMenu('repoContextMenu', repo.dataset.repoMenu, anchor, null);
+  return true;
+}
+
 document.addEventListener('contextmenu', (event) => {
   event.preventDefault();
-  const row = event.target.closest('[data-event]');
-  const repo = event.target.closest('[data-repo-menu]');
-  if (row) openMenu('eventMenu', row.dataset.event, { x: event.clientX, y: event.clientY });
-  else if (repo) openMenu('repoContextMenu', repo.dataset.repoMenu, { x: event.clientX, y: event.clientY });
+  // 키보드로 연 경우(Windows의 메뉴 키 등)는 마우스 위치가 (0, 0)이라 항목 아래에 연다.
+  const fromKeyboard = event.clientX === 0 && event.clientY === 0;
+  openContextMenu(event.target, fromKeyboard ? null : { x: event.clientX, y: event.clientY });
 });
 
 document.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
+  // Shift+F10·메뉴 키: 초점이 있는 항목의 우클릭 메뉴(키보드만 쓰는 사람용). 이미 열린 메뉴 안에서는 무시한다.
+  if ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') {
+    if (!event.target.closest('#menu') && openContextMenu(event.target)) event.preventDefault();
+    return;
+  }
   if (event.ctrlKey && !event.altKey && !event.shiftKey) {
     if (key === 'f' && !view.showingSettings && !view.showsOnboarding) { event.preventDefault(); toggleSearch(); }
     if (key === 'r') { event.preventDefault(); bridge.action('refresh'); }
     if (key === ',') { event.preventDefault(); bridge.action('setShowingSettings', true); }
+    // 검색창 안의 Ctrl+Z는 글자 되돌리기로 둔다.
+    if (key === 'z' && view.readUndo && !event.target.closest('input')) { event.preventDefault(); bridge.action('undoMarkRead'); }
     return;
   }
+  if (!$('#menu').hidden) {
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      moveMenuFocus(event.key);
+      return;
+    }
+    // Tab으로 메뉴 밖으로 나가면 메뉴를 닫는다(열린 채 초점만 빠져나가지 않게).
+    if (event.key === 'Tab') closeMenu({ returnFocus: true });
+  }
   if (event.key === 'Escape') {
-    if (!$('#menu').hidden) closeMenu();
+    if (!$('#menu').hidden) closeMenu({ returnFocus: true });
     else if (view.showingSearch) toggleSearch(false);
     else if (view.showingSettings) bridge.action('setShowingSettings', false);
     else bridge.action('hidePanel');

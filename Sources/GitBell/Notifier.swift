@@ -1,5 +1,6 @@
 // macOS 알림. 알림을 누르면 해당 GitHub 페이지가 열리고 그 항목은 읽음이 된다.
 // 한 번에 새 항목이 많으면(5개 초과) 요약 알림 하나로 묶는다. 어떤 항목을 알릴지는 AppModel이 고른다.
+// GitBell에서 읽음으로 바꾼 항목의 알림은 알림 센터에서도 지운다(removeDelivered).
 
 import AppKit
 import GitBellCore
@@ -56,6 +57,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         add(content, id: "test-\(UUID())", playsSound: playsSound)
     }
 
+    /// 읽은 항목의 알림을 알림 센터에서 지운다. includeSummaries면 요약 알림('summary-…')도 지운다.
+    func removeDelivered(ids: [String], includeSummaries: Bool) {
+        guard isAvailable else { return }
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+        guard includeSummaries else { return }
+        center.getDeliveredNotifications { delivered in
+            let summaries = delivered.map(\.request.identifier).filter { $0.hasPrefix("summary-") }
+            if !summaries.isEmpty { center.removeDeliveredNotifications(withIdentifiers: summaries) }
+        }
+    }
+
     private func add(_ content: UNMutableNotificationContent, id: String, playsSound: Bool) {
         content.sound = playsSound ? .default : nil
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: id, content: content, trigger: nil))
@@ -73,7 +86,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             AppModel.openHTTPS(url)
         }
         if let id = info["id"] as? String {
-            Task { @MainActor in AppModel.shared.markRead(id) }
+            Task { @MainActor in AppModel.shared.markOpened(id) }
         }
         completionHandler()
     }

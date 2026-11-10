@@ -155,4 +155,29 @@ extension WatchState {
             history[index].isUnread = false
         }
     }
+
+    /// 여러 항목을 한 번에 읽음으로 바꾼다(묶음의 '읽음 표시', '모두 읽음').
+    public mutating func markRead(ids: Set<String>) {
+        for index in history.indices where ids.contains(history[index].id) {
+            history[index].isUnread = false
+        }
+    }
+
+    /// '되돌리기': 방금 읽음으로 바꾼 항목을 다시 안 읽음으로.
+    public mutating func markUnread(ids: Set<String>) {
+        for index in history.indices where ids.contains(history[index].id) {
+            history[index].isUnread = true
+        }
+    }
+
+    /// 항목을 열었을 때: 같은 PR·이슈(저장소 + 번호)의 안 읽은 항목도 함께 읽음으로 바꾼다.
+    /// 페이지를 열면 그 PR의 리뷰·댓글도 함께 보게 되기 때문이다. 번호가 없는 항목(push 등)은 그 항목만 바꾼다.
+    /// GitHub에서 PR과 이슈는 저장소 안에서 번호를 나눠 쓰므로 저장소 + 번호로 같은 대화를 가린다.
+    public mutating func markThreadRead(_ id: String) {
+        guard let opened = history.first(where: { $0.id == id }) else { return }
+        guard let number = opened.number else { return markRead(id) }
+        for index in history.indices where history[index].repo == opened.repo && history[index].number == number {
+            history[index].isUnread = false
+        }
+    }
 }

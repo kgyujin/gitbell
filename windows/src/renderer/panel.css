@@ -233,6 +233,25 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
   border-radius: 8px;
 }
 .row-item:hover { background: var(--hover); }
+/* 안 읽은 줄에 마우스를 올리거나 초점이 가면 ● 자리에 '읽음 표시' 단추가 나온다. */
+.row-wrap { position: relative; }
+.row-read {
+  position: absolute;
+  right: 12px;
+  bottom: 6px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--accent);
+  opacity: 0;
+}
+.row-read .icon { width: 15px; height: 15px; }
+.row-read:hover { background: var(--hover); }
+.row-wrap:hover .row-read, .row-read:focus-visible { opacity: 1; }
+.row-wrap:hover .unread-dot, .row-wrap:has(.row-read:focus-visible) .unread-dot { visibility: hidden; }
+.row-wrap:hover .row-item { background: var(--hover); }
 
 .kind-badge {
   width: 28px;
@@ -280,6 +299,16 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 }
 .empty strong { font-size: 13px; font-weight: 500; }
 .empty-icon { width: 28px; height: 28px; color: var(--secondary); stroke-width: 1.5; }
+
+.undo-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  font-size: 11px;
+  background: var(--card);
+}
+.undo-bar .icon { width: 13px; height: 13px; }
 
 .update {
   display: flex;
@@ -343,6 +372,8 @@ code {
   user-select: text;
 }
 
+.problem .problem-action { margin-left: auto; flex: none; font-weight: 600; }
+.account-hint { margin: 0 0 4px 24px; }
 .token-field { display: grid; gap: 6px; padding: 4px 0; }
 .token-field input {
   flex: 1;
@@ -434,7 +465,7 @@ code {
 .menu-scroll { max-height: 280px; overflow-y: auto; }
 .menu-divider { height: 1px; background: var(--border); margin: 4px 0; }
 .option { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border-radius: 5px; }
-.option:hover { background: var(--hover); }
+.option:hover, .option:focus-visible { background: var(--hover); }
 .option .check { width: 10px; display: grid; color: var(--accent); }
 .option .check .icon { width: 10px; height: 10px; stroke-width: 3; }
 .option-text { display: grid; min-width: 0; }
