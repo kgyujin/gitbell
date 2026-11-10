@@ -123,7 +123,7 @@ test('AppModel: 오류를 문제 문구로 바꾼다', async () => {
   const partial = harness({ routes: { ...pushRoutes([]), 'user/repos': [
     { full_name: 'org/repo', pushed_at: '2026-11-09T05:30:00Z' }, { full_name: 'org/broken', pushed_at: '2026-11-09T05:30:00Z' }] } });
   await partial.model.refresh();
-  assert.equal(partial.model.viewModel().problemMessage, "Couldn't read 1 repositories: broken");
+  assert.equal(partial.model.viewModel().problemMessage, "Couldn't read 1 repository: broken");
   assert.equal(partial.model.trayState().hasProblem, false, '일부 실패는 아이콘을 바꾸지 않는다');
 });
 

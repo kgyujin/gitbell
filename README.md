@@ -43,7 +43,7 @@ GitBell installs to `%LOCALAPPDATA%\Programs\GitBell`, adds a Start menu shortcu
 > [!NOTE]
 > Needs Windows 10 or later and Node.js 22.12+. The first install downloads Electron (about 100 MB). Your token is encrypted for your Windows account and stays on this PC; settings and history live in `%APPDATA%\GitBell`.
 
-**Connect GitHub.** If you use [GitHub CLI](https://cli.github.com), there's nothing to do. Otherwise, paste a [personal access token](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell) with `repo`, `notifications` and `read:org` into the app.
+**Connect GitHub.** If you use [GitHub CLI](https://cli.github.com), there's nothing to do. Otherwise, paste a [personal access token](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell) with `repo`, `notifications` and `read:org` into the app. Fine-grained tokens can't read notifications, so GitBell then checks only repositories with recent pushes.
 
 ## Features
 
@@ -51,8 +51,8 @@ GitBell installs to `%LOCALAPPDATA%\Programs\GitBell`, adds a Start menu shortcu
 - **Notifications you control.** Native banners with optional sound. Turn each type on or off, or only hear about pull requests you opened.
 - **Find things fast.** Filter by type, repository, unread or **Mine** (others' activity on your PRs). Sort by newest, by repository or unread first. Search titles, people and `#numbers`.
 - **Less noise.** Your own activity is hidden by default. Hide a busy repository with a right-click, or hide all bot accounts with one switch.
-- **Private.** Talks only to GitHub, plus npm twice a day to check for updates. Your token stays in the macOS Keychain.
-- **English and Korean.** Follows your macOS language.
+- **Private.** Talks only to GitHub, plus npm twice a day to check for updates. Your token stays on your computer: in the macOS Keychain, or encrypted for your Windows account.
+- **English and Korean.** Follows your system language.
 
 ## Tips
 

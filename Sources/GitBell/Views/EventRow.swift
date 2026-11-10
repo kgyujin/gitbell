@@ -96,6 +96,7 @@ struct EventRow: View {
             Spacer(minLength: 6)
             if event.isUnread {
                 Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                    .accessibilityLabel(Text("Unread"))
             }
         }
         .font(.system(size: 11))
@@ -113,6 +114,7 @@ private struct KindBadge: View {
             .frame(width: 28, height: 28)
             .background(Circle().fill(kind.tint.opacity(0.15)))
             .padding(.top, 1)
+            .accessibilityHidden(true)
     }
 }
 
@@ -127,6 +129,7 @@ private struct Avatar: View {
         }
         .frame(width: 14, height: 14)
         .clipShape(Circle())
+        .accessibilityHidden(true)
     }
 
     /// GitHub 아바타 주소에 크기를 붙여 작은 이미지만 받는다.

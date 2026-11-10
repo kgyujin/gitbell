@@ -17,12 +17,16 @@ final class AppModel: ObservableObject {
         case unauthorized
         case network(String)
         case partial([String])
+        /// 알림함을 읽을 수 없는 토큰이라 최근 push가 있는 저장소만 확인한다.
+        case limited
+        /// GitHub API 한도에 걸렸다. 다시 쓸 수 있는 시각(알 수 있을 때).
+        case rateLimited(Date?)
 
         /// 목록을 아예 못 채우는 문제인지(메뉴 막대 아이콘을 바꾼다).
         var isBlocking: Bool {
             switch self {
             case .noToken, .unauthorized: return true
-            case .network, .partial: return false
+            case .network, .partial, .limited, .rateLimited: return false
             }
         }
     }
@@ -38,6 +42,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var notificationAuthorization: NotificationAuthorization = .unknown
     /// npm에 이 앱보다 새 버전이 있으면 그 버전.
     @Published private(set) var availableUpdate: String?
+    /// 키체인에 토큰을 저장하지 못했는지. 토큰 입력칸 아래에 알린다.
+    @Published private(set) var tokenSaveFailed = false
 
     /// 목록 필터·검색·정렬. 검색어를 뺀 나머지는 다음에 열 때도 그대로 쓰도록 저장한다.
     @Published var query = ActivityQuery() { didSet { saveQuery() } }
@@ -62,6 +68,10 @@ final class AppModel: ObservableObject {
 
     private let defaults = UserDefaults.standard
     private var loopTask: Task<Void, Never>?
+    /// 확인 중에 다시 확인해 달라는 요청이 왔는지(토큰 저장 직후 등).
+    private var refreshAgain = false
+    /// 계정(토큰)의 세대. 확인 도중 토큰이 바뀌면 그 결과를 버린다.
+    private var accountGeneration = 0
 
     private enum Keys {
         static let refreshMinutes = "refreshMinutes"
@@ -125,6 +135,14 @@ final class AppModel: ObservableObject {
 
     func start() {
         state = Self.loadState()
+        // 잠자기에서 깨면 다음 주기를 기다리지 않고 바로 확인한다(네트워크가 붙을 시간을 조금 준다).
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil,
+                                                          queue: .main) { _ in
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 5 * 1_000_000_000)
+                await AppModel.shared.refresh()
+            }
+        }
         restartLoop()
         refreshNotificationAuthorization()
         Task { await checkForUpdate() }
@@ -147,9 +165,22 @@ final class AppModel: ObservableObject {
     }
 
     func refresh() async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            // 토큰을 바꾼 직후처럼 꼭 다시 확인해야 할 때는 지금 확인이 끝난 뒤 한 번 더 한다.
+            // (예전에는 그냥 건너뛰어, 새 토큰이 다음 주기(최대 15분)까지 확인되지 않았다.)
+            refreshAgain = true
+            return
+        }
         isRefreshing = true
         defer { isRefreshing = false }
+        repeat {
+            refreshAgain = false
+            await refreshOnce()
+        } while refreshAgain
+    }
+
+    private func refreshOnce() async {
+        let account = accountGeneration
         // 사용자가 시스템 설정에서 알림을 켜고 끌 수 있어 확인할 때마다 권한도 다시 읽는다.
         refreshNotificationAuthorization()
 
@@ -163,15 +194,25 @@ final class AppModel: ObservableObject {
         let poller = ActivityPoller(api: URLSessionGitHubAPI(token: token.value))
         do {
             let result = try await poller.refresh(state, now: Date(), includeOwn: includeOwnActivity)
+            // 확인하는 동안 토큰이 바뀌었으면 예전 계정의 결과라 버린다(바로 다시 확인한다).
+            guard account == accountGeneration else { return }
             // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.
             state = result.state.adoptingReadMarks(from: state)
             saveState()
-            problem = result.failedRepos.isEmpty ? nil : .partial(result.failedRepos)
+            if !result.failedRepos.isEmpty {
+                problem = .partial(result.failedRepos)
+            } else {
+                problem = result.notificationsUnavailable ? .limited : nil
+            }
             let toNotify = eventsToNotify(result.newEvents, notifications: notificationPrefs, display: display,
                                           me: state.me)
             Notifier.shared.post(toNotify, playsSound: notificationPrefs.playsSound)
+        } catch where account != accountGeneration {
+            // 예전 계정으로 한 확인의 오류는 보이지 않는다.
         } catch GitHubError.unauthorized {
             problem = .unauthorized
+        } catch let GitHubError.rateLimited(resetAt) {
+            problem = .rateLimited(resetAt)
         } catch let GitHubError.http(status, message) {
             problem = .network("HTTP \(status) \(message)")
         } catch let GitHubError.network(message) {
@@ -179,6 +220,11 @@ final class AppModel: ObservableObject {
         } catch {
             problem = .network(error.localizedDescription)
         }
+    }
+
+    /// 계정을 아직 연결하지 않아 연결 안내를 보여야 하는지.
+    var showsOnboarding: Bool {
+        problem == .noToken || (problem == .unauthorized && state.history.isEmpty)
     }
 
     // MARK: 목록
@@ -192,6 +238,7 @@ final class AppModel: ObservableObject {
     private var effectiveQuery: ActivityQuery {
         var current = query
         current.me = state.me
+        current.kindLabels = Self.kindLabels
         return current
     }
 
@@ -211,7 +258,7 @@ final class AppModel: ObservableObject {
     }
 
     func open(_ event: ActivityEvent) {
-        NSWorkspace.shared.open(event.url)
+        Self.openHTTPS(event.url)
         markRead(event.id)
     }
 
@@ -233,6 +280,18 @@ final class AppModel: ObservableObject {
     func markUnread(_ id: String) {
         state.markUnread(id)
         saveState()
+    }
+
+    /// 검색용 화면 언어 종류 이름. 언어는 실행 중에 바뀌지 않아 한 번만 만든다.
+    private static let kindLabels: [EventKind: String] = Dictionary(uniqueKeysWithValues: EventKind.allCases.map { kind in
+        (kind, L10n.kindLabel(ActivityEvent(id: "", repo: "", kind: kind, time: Date(), actor: "", title: "",
+                                            url: URL(string: "https://github.com")!)))
+    })
+
+    /// GitHub 자료에서 온 주소는 https만 연다(Windows판과 같은 규칙).
+    nonisolated static func openHTTPS(_ url: URL) {
+        guard url.scheme?.lowercased() == "https" else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func copyLink(_ event: ActivityEvent) {
@@ -309,8 +368,11 @@ final class AppModel: ObservableObject {
     func saveToken(_ token: String) {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        TokenStore.save(trimmed)
+        // 키체인 저장이 실패하면 기록을 지우지 않고 화면에 알린다.
+        tokenSaveFailed = !TokenStore.save(trimmed)
+        guard !tokenSaveFailed else { return }
         // 다른 계정일 수 있으니 기록을 비우고 첫 실행처럼 다시 채운다.
+        accountGeneration += 1
         state = WatchState()
         saveState()
         Task { await refresh() }
@@ -318,6 +380,7 @@ final class AppModel: ObservableObject {
 
     func removeSavedToken() {
         TokenStore.deleteKeychain()
+        accountGeneration += 1
         state = WatchState()
         saveState()
         Task { await refresh() }
@@ -325,12 +388,31 @@ final class AppModel: ObservableObject {
 
     // MARK: 로그인 시 실행
 
+    /// 자동 실행을 켰는데 macOS가 아직 허용하지 않았거나 켜지 못했는지. 설정 화면에서 안내한다.
+    @Published private(set) var launchAtLoginNeedsAttention = false
+
     var launchAtLogin: Bool {
         get { SMAppService.mainApp.status == .enabled }
         set {
             objectWillChange.send()
-            if newValue { try? SMAppService.mainApp.register() } else { try? SMAppService.mainApp.unregister() }
+            // 예전에는 실패를 버려서, 스위치가 꺼진 채 아무 안내도 없었다.
+            do {
+                if newValue { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+            } catch {
+                // 아래에서 상태로 판단한다.
+            }
+            launchAtLoginNeedsAttention = newValue && SMAppService.mainApp.status != .enabled
         }
+    }
+
+    /// 사용자가 시스템 설정에서 직접 허용해야 하는 상태인지(설정을 열 때마다 다시 본다).
+    func refreshLaunchAtLoginStatus() {
+        if SMAppService.mainApp.status == .requiresApproval { launchAtLoginNeedsAttention = true }
+        if SMAppService.mainApp.status == .enabled { launchAtLoginNeedsAttention = false }
+    }
+
+    func openLoginItemsSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     // MARK: 저장

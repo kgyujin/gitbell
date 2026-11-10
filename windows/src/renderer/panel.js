@@ -13,6 +13,8 @@
 const bridge = window.gitbell;
 let view = null;
 let strings = {};
+/** 영어에서 개수가 1일 때 쓰는 단수형 키(앱 본체의 l10n.SINGULAR를 받는다). */
+let singular = {};
 let locale = 'en-US';
 let menuBuilder = null;
 let copiedUpdate = false;
@@ -20,7 +22,12 @@ let copiedUpdate = false;
 const t = (key) => (Object.hasOwn(strings, key) ? strings[key] : key);
 const format = (key, ...args) => {
   let index = 0;
-  return t(key).replace(/%lld|%@/g, () => String(args[index++]));
+  let chosen = key;
+  if (!Object.hasOwn(strings, key) && singular[key]) {
+    const count = args[(key.match(/%lld|%@/g) || []).indexOf('%lld')];
+    if (Number(count) === 1) chosen = singular[key];
+  }
+  return t(chosen).replace(/%lld|%@/g, () => String(args[index++]));
 };
 const esc = (value) => String(value == null ? '' : value)
   .replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -62,7 +69,7 @@ function renderHeader() {
   $('#header').innerHTML = `
     <span class="brand">${icon('bell', 'brand-icon')}<strong>GitBell</strong>${unread}</span>
     <span class="spacer"></span>
-    ${iconButton('search', t('Search (Ctrl+F)'), 'data-ui="toggleSearch"', { active: view.showingSearch })}
+    ${view.showsOnboarding ? '' : iconButton('search', t('Search (Ctrl+F)'), 'data-ui="toggleSearch"', { active: view.showingSearch })}
     ${view.visibleUnreadCount > 0 ? iconButton('checkCircle', t('Mark everything shown as read'), actionAttrs('markRead')) : ''}
     ${iconButton('refresh', t('Refresh (Ctrl+R)'), actionAttrs('refresh'), { spinning: view.isRefreshing })}
     ${iconButton('settings', t('Settings (Ctrl+,)'), actionAttrs('setShowingSettings', true))}`;
@@ -158,7 +165,7 @@ function renderRow(event) {
         </span>
         <span class="title">${esc(event.title)}</span>
         <span class="meta"><span class="kind tint-${tint}">${esc(event.kindLabel)}</span>${actor}
-          <span class="spacer"></span>${event.isUnread ? '<span class="unread-dot" aria-label="unread"></span>' : ''}</span>
+          <span class="spacer"></span>${event.isUnread ? `<span class="unread-dot" role="img" aria-label="${esc(t('Unread'))}"></span>` : ''}</span>
       </span>
     </button>`;
 }
@@ -503,6 +510,7 @@ $('#searchClear').addEventListener('click', () => {
 async function start() {
   const init = await bridge.init();
   strings = init.strings || {};
+  singular = init.singular || {};
   locale = init.locale || 'en-US';
   document.documentElement.lang = locale.slice(0, 2);
   if (init.accent) document.documentElement.style.setProperty('--accent', init.accent);

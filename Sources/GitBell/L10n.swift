@@ -10,6 +10,12 @@ enum L10n {
         NSLocalizedString(key, comment: "")
     }
 
+    /// String(format:)와 같지만, 번역이 없는 언어(영어)에서 %lld 값이 1이면 단수형 키를 쓴다(PluralKeys).
+    static func format(_ key: String, _ args: CVarArg...) -> String {
+        let chosen = PluralKeys.key(for: key, arguments: args, isTranslated: string(key) != key)
+        return String(format: string(chosen), arguments: args)
+    }
+
     /// 종류 이름. 목록에서 색 글씨로 보인다.
     static func kindLabel(_ event: ActivityEvent) -> String {
         switch event.kind {
@@ -22,7 +28,7 @@ enum L10n {
         case .comment: return string("Commented")
         case .push:
             if let count = event.commitCount, count > 0 {
-                return String(format: string("Pushed %lld commits"), count)
+                return format("Pushed %lld commits", count)
             }
             return string("Pushed")
         case .forcePush: return string("Force-pushed")

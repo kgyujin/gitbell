@@ -298,3 +298,118 @@ final class ActivityPollerTests: XCTestCase {
         XCTAssertEqual(result.state.unreadCount, 1)
     }
 }
+
+/// 상태 코드를 정해 실패하는 경로를 둘 수 있는 가짜 GitHub(알림함 실패 검증용).
+private struct FailingRouteGitHub: GitHubAPI {
+    var base: FakeGitHub
+    var failing: [String: GitHubError]
+
+    func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
+        if let error = failing.first(where: { path.hasPrefix($0.key) })?.value { throw error }
+        return try await base.get(path, as: type)
+    }
+}
+
+final class NotificationsUnavailableTests: XCTestCase {
+    private let recent = "2026-11-09T05:30:00Z"
+
+    private func base() -> FakeGitHub {
+        FakeGitHub(routes: [
+            ("user/repos", #"[{"full_name":"org/repo","pushed_at":"\#(recent)","archived":false}]"#),
+            ("user", #"{"login":"me"}"#),
+            ("repos/org/repo/pulls/comments", "[]"),
+            ("repos/org/repo/pulls", "[]"),
+            ("repos/org/repo/issues/comments", "[]"),
+            ("repos/org/repo/activity", "[]"),
+        ])
+    }
+
+    func testFineGrainedTokenStillChecksPushedRepositories() async throws {
+        // 세분화 토큰은 알림함에 403을 돌려준다.
+        let api = FailingRouteGitHub(base: base(), failing: [
+            "notifications": .http(status: 403, message: "Resource not accessible by personal access token"),
+        ])
+        let result = try await ActivityPoller(api: api).refresh(WatchState(), now: now, includeOwn: false)
+        XCTAssertTrue(result.notificationsUnavailable)
+        XCTAssertEqual(result.state.checkedRepos, ["org/repo"], "최근 push가 있는 저장소는 그대로 확인한다")
+        XCTAssertNotNil(result.state.lastChecked)
+    }
+
+    func testWorkingNotificationsAreNotFlagged() async throws {
+        var fake = base()
+        fake.routes.insert(("notifications", "[]"), at: 0)
+        let result = try await ActivityPoller(api: fake).refresh(WatchState(), now: now, includeOwn: false)
+        XCTAssertFalse(result.notificationsUnavailable)
+    }
+
+    func testInvalidTokenIsStillAnError() async {
+        let api = FailingRouteGitHub(base: base(), failing: ["notifications": .unauthorized])
+        do {
+            _ = try await ActivityPoller(api: api).refresh(WatchState(), now: now, includeOwn: false)
+            XCTFail("401은 연결 오류로 올라가야 한다")
+        } catch {
+            XCTAssertEqual(error as? GitHubError, .unauthorized)
+        }
+    }
+}
+
+final class RateLimitTests: XCTestCase {
+    private let clock = Date(timeIntervalSince1970: 1_000_000)
+
+    func testDetectsPrimaryAndSecondaryLimits() {
+        // 1차 한도: 403 + 남은 횟수 0, 다시 쓸 수 있는 시각은 x-ratelimit-reset(초 단위 epoch)
+        XCTAssertEqual(RateLimit.detect(status: 403, remaining: "0", reset: "1000600", retryAfter: nil, message: "",
+                                        now: clock), .some(Date(timeIntervalSince1970: 1_000_600)))
+        // 2차 한도: 문구로 알리고 retry-after(초)를 준다
+        XCTAssertEqual(RateLimit.detect(status: 403, remaining: "4000", reset: nil, retryAfter: "60",
+                                        message: "You have exceeded a secondary rate limit", now: clock),
+                       .some(clock.addingTimeInterval(60)))
+        XCTAssertEqual(RateLimit.detect(status: 429, remaining: nil, reset: nil, retryAfter: nil, message: "", now: clock),
+                       .some(nil), "시각을 모르면 nil")
+    }
+
+    func testOtherErrorsAreNotLimits() {
+        XCTAssertNil(RateLimit.detect(status: 403, remaining: "4999", reset: nil, retryAfter: nil,
+                                      message: "Resource not accessible by personal access token", now: clock))
+        XCTAssertNil(RateLimit.detect(status: 404, remaining: "0", reset: nil, retryAfter: nil, message: "", now: clock))
+    }
+
+    func testLimitMidRefreshKeepsLastCheckedSoNothingIsMissed() async {
+        let base = FakeGitHub(routes: [
+            ("user/repos", #"[{"full_name":"org/repo","pushed_at":"2026-11-09T05:30:00Z","archived":false}]"#),
+            ("user", #"{"login":"me"}"#),
+            ("notifications", "[]"),
+        ])
+        let api = FailingRouteGitHub(base: base, failing: ["repos/org/repo": .rateLimited(resetAt: nil)])
+        var state = WatchState()
+        state.me = "me"
+        state.lastChecked = date("2026-11-09T05:00:00Z")
+        do {
+            _ = try await ActivityPoller(api: api).refresh(state, now: now, includeOwn: false)
+            XCTFail("저장소를 읽다가 한도에 걸리면 한도 오류로 끝나야 한다")
+        } catch {
+            XCTAssertEqual(error as? GitHubError, .rateLimited(resetAt: nil))
+        }
+        // refresh는 값 복사본을 고치므로, 실패하면 호출한 쪽의 상태(lastChecked)는 그대로다.
+        XCTAssertEqual(state.lastChecked, date("2026-11-09T05:00:00Z"))
+    }
+}
+
+final class PushTitleRetryTests: XCTestCase {
+    private func push() -> ActivityEvent {
+        ActivityEvent(id: "o/r#act:1", repo: "o/r", kind: .push, time: Date(), actor: "amy", branch: "main", title: "",
+                      url: URL(string: "https://github.com/o/r")!, before: EventBuilder.zeroSHA, after: "bbb",
+                      detailResolved: false)
+    }
+
+    func testTemporaryFailureIsRetriedLater() async {
+        let api = FailingRouteGitHub(base: FakeGitHub(routes: []), failing: ["repos/o/r/commits": .rateLimited(resetAt: nil)])
+        let resolved = await ActivityPoller(api: api).resolvePush(push())
+        XCTAssertFalse(resolved.detailResolved, "한도에 걸리면 다음 확인 때 다시 읽는다")
+    }
+
+    func testMissingCommitIsNotRetried() async {
+        let resolved = await ActivityPoller(api: FakeGitHub(routes: [])).resolvePush(push())   // 404
+        XCTAssertTrue(resolved.detailResolved, "사라진 커밋은 다시 읽어도 안 된다")
+    }
+}
