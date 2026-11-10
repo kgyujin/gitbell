@@ -47,6 +47,8 @@ html, body {
   font: 12px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
   user-select: none;
+  /* 한국어는 낱말 중간에서 줄을 바꾸지 않는다('없습 / 니다' 방지). 긴 URL 같은 건 .title의 overflow-wrap이 끊는다. */
+  word-break: keep-all;
 }
 
 body { border: 1px solid var(--border); }

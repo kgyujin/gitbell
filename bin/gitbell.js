@@ -72,9 +72,42 @@ function checkPlatform() {
 }
 
 /** Package.swift가 swift-tools-version 5.10을 쓰므로 Swift 5.10(Xcode 15.3) 이상이 필요하다. */
+/**
+ * Swift·빌드가 실패한 출력에서 흔한 원인을 찾아 해결 방법을 돌려준다. 모르는 원인이면 null.
+ * - Xcode 라이선스에 동의하지 않음 → sudo xcodebuild -license accept
+ * - 명령줄 도구 경로가 깨짐(macOS 업데이트 뒤 흔함) → xcode-select --install
+ * - 디스크 공간 부족
+ */
+function explainBuildProblem(output) {
+  const text = String(output || '');
+  if (/agreed to the Xcode (and Apple SDKs )?license|xcodebuild -license/i.test(text)) {
+    return {
+      problem: t('You need to accept the Xcode license first.', 'Xcode 라이선스에 먼저 동의해야 합니다.'),
+      hint: `${t('Run this, then run the installer again:', '아래 명령을 실행한 뒤 설치를 다시 실행하세요:')}\n  ${bold('sudo xcodebuild -license accept')}`,
+    };
+  }
+  if (/invalid active developer path|missing xcrun|xcrun: error: unable to find utility/i.test(text)) {
+    return {
+      problem: t('The Xcode command line tools are missing or broken (common after a macOS update).',
+        'Xcode 명령줄 도구가 없거나 깨졌습니다(macOS 업데이트 뒤에 흔합니다).'),
+      hint: `${t('Reinstall them, then run this again:', '다시 설치한 뒤 다시 실행하세요:')}\n  ${bold('xcode-select --install')}`,
+    };
+  }
+  if (/No space left on device/i.test(text)) {
+    return {
+      problem: t('There is not enough disk space to build GitBell.', 'GitBell을 빌드할 디스크 공간이 부족합니다.'),
+      hint: t('Free up about 1 GB, then run this again.', '1GB쯤 비운 뒤 다시 실행하세요.'),
+    };
+  }
+  return null;
+}
+
 function checkSwift() {
   const result = run('xcrun', ['swift', '--version']);
   if (result.status !== 0) {
+    // '설치되지 않음'만 있는 게 아니다. 라이선스 미동의, 깨진 도구 경로도 여기서 실패한다.
+    const known = explainBuildProblem(`${result.stdout || ''}\n${result.stderr || ''}\n${result.error || ''}`);
+    if (known) fail(known.problem, known.hint);
     fail(
       t('Swift is not installed.', 'Swift가 설치되어 있지 않습니다.'),
       t('Install the Xcode command line tools, then run this again:', 'Xcode 명령줄 도구를 설치한 뒤 다시 실행하세요:') +
@@ -117,6 +150,8 @@ function install() {
   fs.writeFileSync(logPath, `${build.stdout || ''}\n${build.stderr || ''}`);
   const builtApp = path.join(workDir, 'dist', 'GitBell.app');
   if (build.status !== 0 || !fs.existsSync(builtApp)) {
+    const known = explainBuildProblem(`${build.stdout || ''}\n${build.stderr || ''}`);
+    if (known) fail(known.problem, `${known.hint}\n  ${t('Full log:', '전체 로그:')} ${logPath}`);
     const tail = `${build.stdout || ''}\n${build.stderr || ''}`.trim().split('\n').slice(-15).join('\n');
     fail(t('Build failed.', '빌드에 실패했습니다.'), `${dim(tail)}\n  ${t('Full log:', '전체 로그:')} ${logPath}`);
   }
@@ -344,4 +379,4 @@ if (require.main === module) {
   main(process.argv.slice(2));
 }
 
-module.exports = { main, WIN_INSTALL_DIR, WIN_APP_DIR, WIN_DATA_DIR, WIN_APP_ENTRIES };
+module.exports = { main, explainBuildProblem, WIN_INSTALL_DIR, WIN_APP_DIR, WIN_DATA_DIR, WIN_APP_ENTRIES };
