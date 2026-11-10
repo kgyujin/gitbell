@@ -6,6 +6,22 @@ public enum GitHubError: Error, Equatable, Sendable {
     case unauthorized
     case http(status: Int, message: String)
     case network(String)
+    /// API 한도에 걸렸다. resetAt은 다시 쓸 수 있는 시각(알 수 있을 때).
+    case rateLimited(resetAt: Date?)
+}
+
+/// GitHub API 한도 초과인지 가린다. 1차 한도(403/429 + 남은 횟수 0)와 2차 한도(문구에 'rate limit')를 모두 본다.
+public enum RateLimit {
+    /// 한도 초과면 다시 쓸 수 있는 시각(모르면 nil)을 담은 값을, 아니면 nil을 돌려준다.
+    public static func detect(status: Int, remaining: String?, reset: String?, retryAfter: String?, message: String,
+                              now: Date = Date()) -> Date?? {
+        guard status == 403 || status == 429 else { return nil }
+        let limited = status == 429 || remaining == "0" || message.lowercased().contains("rate limit")
+        guard limited else { return nil }
+        if let seconds = retryAfter.flatMap(Double.init) { return .some(now.addingTimeInterval(seconds)) }
+        if let epoch = reset.flatMap(Double.init) { return .some(Date(timeIntervalSince1970: epoch)) }
+        return .some(nil)
+    }
 }
 
 public protocol GitHubAPI: Sendable {
@@ -43,6 +59,14 @@ public struct URLSessionGitHubAPI: GitHubAPI {
         if status == 401 { throw GitHubError.unauthorized }
         guard (200..<300).contains(status) else {
             let message = (try? JSONDecoder().decode([String: String].self, from: data))?["message"] ?? ""
+            let http = response as? HTTPURLResponse
+            if let resetAt = RateLimit.detect(status: status,
+                                              remaining: http?.value(forHTTPHeaderField: "x-ratelimit-remaining"),
+                                              reset: http?.value(forHTTPHeaderField: "x-ratelimit-reset"),
+                                              retryAfter: http?.value(forHTTPHeaderField: "retry-after"),
+                                              message: message) {
+                throw GitHubError.rateLimited(resetAt: resetAt)
+            }
             throw GitHubError.http(status: status, message: message)
         }
         return try GitHubJSON.decoder().decode(T.self, from: data)

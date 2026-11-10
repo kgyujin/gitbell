@@ -28,7 +28,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         if events.count > individualLimit {
             let content = UNMutableNotificationContent()
             content.title = "GitBell"
-            content.subtitle = String(format: L10n.string("%lld new activities"), events.count)
+            content.subtitle = L10n.format("%lld new activities", events.count)
             content.body = Array(Set(events.map(\.repoName))).sorted().joined(separator: ", ")
             content.userInfo = ["url": "https://github.com/notifications"]
             add(content, id: "summary-\(UUID())", playsSound: playsSound)
@@ -70,7 +70,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
         if let link = info["url"] as? String, let url = URL(string: link) {
-            NSWorkspace.shared.open(url)
+            AppModel.openHTTPS(url)
         }
         if let id = info["id"] as? String {
             Task { @MainActor in AppModel.shared.markRead(id) }

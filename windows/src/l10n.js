@@ -29,6 +29,26 @@ function loadKoreanStrings() {
   return strings;
 }
 
+/**
+ * 개수가 1일 때 영어에서 쓰는 단수형 키("Pushed 1 commits" 대신 "Pushed 1 commit").
+ * 한국어는 단수·복수 구분이 없어 원래 키의 번역을 그대로 쓴다. macOS판 L10n.swift와 같은 표다.
+ */
+const SINGULAR = Object.freeze({
+  'Pushed %lld commits': 'Pushed %lld commit',
+  '%lld items': '%lld item',
+  'Checked %@ · %lld repositories': 'Checked %@ · %lld repository',
+  "Couldn't read %lld repositories:": "Couldn't read %lld repository:",
+  '%lld new activities': '%lld new activity',
+});
+
+/** %lld 자리에 들어갈 값이 1이고 번역이 없으면(영어) 단수형 키를 고른다. */
+function pluralKey(key, args, translated) {
+  if (translated || !SINGULAR[key]) return key;
+  const tokens = key.match(/%lld|%@/g) || [];
+  const count = args[tokens.indexOf('%lld')];
+  return Number(count) === 1 ? SINGULAR[key] : key;
+}
+
 /** 첫 번째 선호 언어가 한국어인지. GITBELL_LANG(ko/en)으로 바꿀 수 있다. */
 function prefersKorean(languages, override = process.env.GITBELL_LANG) {
   if (/^ko/i.test(override || '')) return true;
@@ -45,7 +65,8 @@ function createL10n({ korean, strings = korean ? loadKoreanStrings() : new Map()
   /** %lld·%@ 자리에 값을 차례로 넣는다. */
   const format = (key, ...args) => {
     let index = 0;
-    return t(key).replace(/%lld|%@/g, () => String(args[index++]));
+    const chosen = pluralKey(key, args, korean && strings.has(key));
+    return t(chosen).replace(/%lld|%@/g, () => String(args[index++]));
   };
 
   function kindLabel(event) {
@@ -122,4 +143,6 @@ function createL10n({ korean, strings = korean ? loadKoreanStrings() : new Map()
   };
 }
 
-module.exports = { parseStrings, loadKoreanStrings, prefersKorean, createL10n, SHARED_STRINGS, WINDOWS_STRINGS };
+module.exports = {
+  parseStrings, loadKoreanStrings, prefersKorean, createL10n, pluralKey, SINGULAR, SHARED_STRINGS, WINDOWS_STRINGS,
+};

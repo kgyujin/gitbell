@@ -112,6 +112,9 @@
 /* 문제 */
 "Your GitHub token is invalid or expired. Update it in Settings." = "GitHub 토큰이 잘못됐거나 만료됐습니다. 설정에서 바꿔 주세요.";
 "Couldn't reach GitHub." = "GitHub에 연결하지 못했습니다.";
+"GitHub's API limit was reached. GitBell will check again after %@." = "GitHub API 한도에 걸렸습니다. %@ 이후에 다시 확인합니다.";
+"GitHub's API limit was reached. GitBell will check again later." = "GitHub API 한도에 걸렸습니다. 잠시 뒤 다시 확인합니다.";
+"This token can't read your GitHub notifications, so only repositories with recent pushes are checked. Use GitHub CLI or a classic token." = "이 토큰으로는 GitHub 알림함을 읽을 수 없어 최근 push가 있는 저장소만 확인합니다. GitHub CLI나 classic 토큰을 쓰세요.";
 "Couldn't read %lld repositories:" = "저장소 %lld개를 읽지 못했습니다:";
 
 /* 알림 */
@@ -126,12 +129,15 @@
 "Show notifications" = "알림 표시";
 "Include my own activity" = "내 활동도 표시";
 "Open at login" = "로그인 시 자동 실행";
+"Allow GitBell in System Settings → General → Login Items." = "시스템 설정 → 일반 → 로그인 항목에서 GitBell을 허용하세요.";
+"Open Login Items" = "로그인 항목 열기";
 "Quit GitBell" = "GitBell 종료";
 "Connected with GitHub CLI" = "GitHub CLI로 연결됨";
 "Connected with a personal access token" = "개인 액세스 토큰으로 연결됨";
 "Not connected" = "연결 안 됨";
 "Remove saved token" = "저장한 토큰 지우기";
 "Save" = "저장";
+"Couldn't save the token. Try again." = "토큰을 저장하지 못했습니다. 다시 시도하세요.";
 "Create a token on GitHub (repo, notifications, read:org)" = "GitHub에서 토큰 만들기 (repo, notifications, read:org)";
 
 /* 처음 연결 */
@@ -142,3 +148,10 @@
 "Check again" = "다시 확인";
 "Or paste a personal access token" = "또는 개인 액세스 토큰 붙여넣기";
 "Your token is stored only in the macOS Keychain on this Mac." = "토큰은 이 Mac의 키체인에만 저장됩니다.";
+
+/* 영어 단수형(개수가 1일 때). 한국어는 복수형과 같은 번역을 쓴다. */
+"Pushed %lld commit" = "커밋 %lld개 push";
+"%lld item" = "%lld개";
+"Checked %@ · %lld repository" = "%@ 확인 · 저장소 %lld개";
+"Couldn't read %lld repository:" = "저장소 %lld개를 읽지 못했습니다:";
+"%lld new activity" = "새 활동 %lld개";

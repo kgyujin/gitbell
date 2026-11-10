@@ -6,7 +6,10 @@ const WatchState = require('./core/watch-state');
 const Query = require('./core/activity-query');
 const Prefs = require('./core/preferences');
 const Poller = require('./core/poller');
-const { categoryOf, repoName } = require('./core/models');
+const { categoryOf, repoName, EventKind } = require('./core/models');
+
+/** 활동 종류 전체(검색용 화면 이름을 만들 때 쓴다). */
+const KINDS = Object.values(EventKind);
 const { isBot } = require('./core/event-builder');
 
 const REFRESH_CHOICES = [1, 2, 5, 10, 15];
@@ -173,12 +176,14 @@ class AppModel {
       // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.
       this.state = WatchState.adoptingReadMarks(result.state, this.state);
       this.saveState();
-      this.problem = result.failedRepos.length ? { type: 'partial', repos: result.failedRepos } : null;
+      if (result.failedRepos.length) this.problem = { type: 'partial', repos: result.failedRepos };
+      else this.problem = result.notificationsUnavailable ? { type: 'limited' } : null;
       const toNotify = Prefs.eventsToNotify(result.newEvents, this.settings.notificationPrefs, this.settings.display, this.state.me);
       if (toNotify.length) this.deps.notifier.post(toNotify, this.settings.notificationPrefs.playsSound);
     } catch (error) {
       if (account !== this.accountGeneration) return;
       if (error && error.kind === 'unauthorized') this.problem = { type: 'unauthorized' };
+      else if (error && error.kind === 'rateLimited') this.problem = { type: 'rateLimited', resetAt: error.resetAt || null };
       else if (error && error.kind === 'http') this.problem = { type: 'network', detail: `HTTP ${error.status} ${error.message}`.trim() };
       else this.problem = { type: 'network', detail: (error && error.message) || String(error) };
     }
@@ -191,7 +196,15 @@ class AppModel {
   }
 
   effectiveQuery() {
-    return { ...this.settings.query, search: this.search, me: this.state.me };
+    return { ...this.settings.query, search: this.search, me: this.state.me, kindLabels: this.kindLabels() };
+  }
+
+  /** 검색에 쓰는 화면 언어 종류 이름('머지', '승인'으로도 찾게 한다). */
+  kindLabels() {
+    if (!this.cachedKindLabels) {
+      this.cachedKindLabels = Object.fromEntries(KINDS.map((kind) => [kind, this.l10n.kindLabel({ kind })]));
+    }
+    return this.cachedKindLabels;
   }
 
   get unreadCount() {
@@ -412,6 +425,10 @@ class AppModel {
       case 'unauthorized': return t('Your GitHub token is invalid or expired. Update it in Settings.');
       case 'network': return `${t("Couldn't reach GitHub.")} ${this.problem.detail}`;
       case 'partial': return `${format("Couldn't read %lld repositories:", this.problem.repos.length)} ${this.problem.repos.map(repoName).join(', ')}`;
+      case 'rateLimited': return this.problem.resetAt
+        ? format("GitHub's API limit was reached. GitBell will check again after %@.", this.l10n.clock(this.problem.resetAt))
+        : t("GitHub's API limit was reached. GitBell will check again later.");
+      case 'limited': return t("This token can't read your GitHub notifications, so only repositories with recent pushes are checked. Use GitHub CLI or a classic token.");
       default: return null;
     }
   }

@@ -42,9 +42,7 @@ struct PanelView: View {
         }
     }
 
-    private var showsOnboarding: Bool {
-        model.problem == .noToken || (model.problem == .unauthorized && model.state.history.isEmpty)
-    }
+    private var showsOnboarding: Bool { model.showsOnboarding }
 }
 
 // MARK: - 위쪽
@@ -67,9 +65,12 @@ private struct HeaderView: View {
                     .foregroundStyle(.white)
             }
             Spacer()
-            IconButton(symbol: "magnifyingglass", help: "Search (⌘F)", isActive: model.showingSearch, shortcut: "f") {
-                model.showingSearch.toggle()
-                if !model.showingSearch { model.query.search = "" }
+            // 연결 전에는 찾을 것이 없어 검색 버튼을 숨긴다.
+            if !model.showsOnboarding {
+                IconButton(symbol: "magnifyingglass", help: "Search (⌘F)", isActive: model.showingSearch, shortcut: "f") {
+                    model.showingSearch.toggle()
+                    if !model.showingSearch { model.query.search = "" }
+                }
             }
             if model.visibleUnreadCount > 0 {
                 IconButton(symbol: "checkmark.circle", help: "Mark everything shown as read") { model.markRead() }
@@ -143,7 +144,7 @@ private struct FilterBar: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Text(String(format: L10n.string("%lld items"), model.visibleCount))
+                Text(L10n.format("%lld items", model.visibleCount))
                     .foregroundStyle(.secondary)
             }
             .font(.system(size: 11))
@@ -243,8 +244,16 @@ private struct ProblemBanner: View {
         case .unauthorized: return L10n.string("Your GitHub token is invalid or expired. Update it in Settings.")
         case let .network(detail): return L10n.string("Couldn't reach GitHub.") + " " + detail
         case let .partial(repos):
-            return String(format: L10n.string("Couldn't read %lld repositories:"), repos.count) + " "
+            return L10n.format("Couldn't read %lld repositories:", repos.count) + " "
                 + repos.map { $0.split(separator: "/").last.map(String.init) ?? $0 }.joined(separator: ", ")
+        case let .rateLimited(resetAt):
+            if let resetAt {
+                return String(format: L10n.string("GitHub's API limit was reached. GitBell will check again after %@."),
+                              L10n.clock(resetAt))
+            }
+            return L10n.string("GitHub's API limit was reached. GitBell will check again later.")
+        case .limited:
+            return L10n.string("This token can't read your GitHub notifications, so only repositories with recent pushes are checked. Use GitHub CLI or a classic token.")
         case .noToken, .none: return nil
         }
     }
@@ -435,7 +444,7 @@ private struct FooterView: View {
     var body: some View {
         HStack {
             if let checked = model.state.lastChecked {
-                Text(String(format: L10n.string("Checked %@ · %lld repositories"),
+                Text(L10n.format("Checked %@ · %lld repositories",
                             L10n.clock(checked), model.state.checkedRepos.count))
             } else {
                 Text("Checking…")
@@ -480,6 +489,8 @@ struct IconButton: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        // 아이콘만 있는 버튼이라 VoiceOver가 아이콘 이름 대신 도움말 문구를 읽게 한다.
+        .accessibilityLabel(Text(help))
         .onHover { hovering = $0 }
         if let shortcut {
             button.keyboardShortcut(shortcut, modifiers: .command)
@@ -503,7 +514,8 @@ private struct Chip: View {
         Button(action: action) {
             HStack(spacing: 4) {
                 if let symbol {
-                    Image(systemName: symbol).font(.system(size: 6))
+                    // '안 읽음'의 점은 작게, '내 PR'의 사람 아이콘은 알아볼 수 있는 크기로 그린다.
+                    Image(systemName: symbol).font(.system(size: symbol == "circle.fill" ? 6 : 10, weight: .semibold))
                 }
                 Text(title)
             }

@@ -11,6 +11,8 @@ public struct RefreshResult: Sendable {
     public var newEvents: [ActivityEvent]
     /// 읽지 못한 저장소 이름. 나머지 저장소로는 정상 갱신한다.
     public var failedRepos: [String]
+    /// 알림함을 읽지 못해 최근 push가 있는 저장소만 확인했는지(세분화 토큰 등).
+    public var notificationsUnavailable = false
 }
 
 public struct ActivityPoller: Sendable {
@@ -34,12 +36,27 @@ public struct ActivityPoller: Sendable {
             "user/repos?sort=pushed&direction=desc&per_page=\(config.discoveryPageSize)"
                 + "&affiliation=owner,collaborator,organization_member",
             as: [GHRepo].self)
-        async let notifications = api.get(
-            "notifications?all=true&since=\(Self.iso(since))&per_page=50", as: [GHNotification].self)
-        let selected = RepoSelector.select(repos: try await repos, notifications: try await notifications,
+        // 알림함은 저장소를 고르는 보조 자료다. 세분화 토큰(fine-grained)처럼 알림함을 읽을 수 없는 토큰이면
+        // 실패해도 멈추지 않고 최근 push가 있는 저장소만으로 계속한다. 토큰 자체가 틀린 401만 그대로 올린다.
+        let notifications: [GHNotification]?
+        do {
+            notifications = try await api.get("notifications?all=true&since=\(Self.iso(since))&per_page=50",
+                                              as: [GHNotification].self)
+        } catch GitHubError.unauthorized {
+            throw GitHubError.unauthorized
+        } catch let GitHubError.rateLimited(resetAt) {
+            // 한도 초과는 토큰 종류 문제가 아니라 잠시 기다릴 일이라 그대로 알린다.
+            throw GitHubError.rateLimited(resetAt: resetAt)
+        } catch {
+            notifications = nil
+        }
+        let selected = RepoSelector.select(repos: try await repos, notifications: notifications ?? [],
                                            since: since, now: now, config: config)
 
-        let (events, failed) = await collect(selected, since: since)
+        let (events, failed, rateLimit) = await collect(selected, since: since)
+        // 저장소를 읽다가 한도에 걸렸으면 이번 결과를 버린다. 마지막 확인 시각을 그대로 두어야
+        // 한도가 풀린 뒤 이 구간을 다시 읽는다(앞으로 밀면 그 사이 활동이 빠진다).
+        if let resetAt = rateLimit { throw GitHubError.rateLimited(resetAt: resetAt) }
         state.checkedRepos = selected
         var newEvents = state.apply(events, now: now, includeOwn: includeOwn, config: config)
 
@@ -51,28 +68,41 @@ public struct ActivityPoller: Sendable {
                 newEvents[index] = resolved
             }
         }
-        return RefreshResult(state: state, newEvents: newEvents, failedRepos: failed)
+        return RefreshResult(state: state, newEvents: newEvents, failedRepos: failed,
+                             notificationsUnavailable: notifications == nil)
     }
 
-    func collect(_ repos: [String], since: Date) async -> ([ActivityEvent], [String]) {
+    /// 저장소들을 읽는다. 실패한 저장소 이름과, 한도에 걸렸다면 그 다시 쓸 수 있는 시각도 돌려준다.
+    func collect(_ repos: [String], since: Date) async -> ([ActivityEvent], [String], Date??) {
         var events: [ActivityEvent] = []
         var failed: [String] = []
+        var rateLimit: Date?? = nil
         // 한꺼번에 너무 많이 보내지 않도록 maxConcurrentRepos개씩 나눠 읽는다.
         for start in stride(from: 0, to: repos.count, by: config.maxConcurrentRepos) {
             let chunk = repos[start..<min(start + config.maxConcurrentRepos, repos.count)]
-            await withTaskGroup(of: (String, [ActivityEvent]?).self) { group in
+            await withTaskGroup(of: (String, Result<[ActivityEvent], Error>).self) { group in
                 for repo in chunk {
                     group.addTask {
-                        guard let snapshot = try? await snapshot(repo: repo, since: since) else { return (repo, nil) }
-                        return (repo, EventBuilder.build(snapshot, repo: repo, since: since))
+                        do {
+                            let snapshot = try await snapshot(repo: repo, since: since)
+                            return (repo, .success(EventBuilder.build(snapshot, repo: repo, since: since)))
+                        } catch {
+                            return (repo, .failure(error))
+                        }
                     }
                 }
-                for await (repo, built) in group {
-                    if let built { events.append(contentsOf: built) } else { failed.append(repo) }
+                for await (repo, result) in group {
+                    switch result {
+                    case let .success(built): events.append(contentsOf: built)
+                    case let .failure(GitHubError.rateLimited(resetAt)): rateLimit = .some(resetAt); failed.append(repo)
+                    case .failure: failed.append(repo)
+                    }
                 }
             }
+            // 한도에 걸렸으면 남은 저장소는 읽지 않는다(더 보내도 실패한다).
+            if rateLimit != nil { break }
         }
-        return (events.sorted { $0.time < $1.time }, failed.sorted())
+        return (events.sorted { $0.time < $1.time }, failed.sorted(), rateLimit)
     }
 
     func snapshot(repo: String, since: Date) async throws -> RepoSnapshot {

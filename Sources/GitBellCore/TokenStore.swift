@@ -67,6 +67,7 @@ public enum TokenStore {
 
     /// 메뉴 막대 앱은 로그인 셸 PATH를 물려받지 못해 gh를 흔한 설치 경로에서 찾는다.
     static let ghCandidates = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"]
+    static let ghTimeout: TimeInterval = 10
 
     public static func githubCLIPath() -> String? {
         ghCandidates.first { FileManager.default.isExecutableFile(atPath: $0) }
@@ -80,12 +81,19 @@ public enum TokenStore {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = Pipe()
+        // gh가 키체인 잠금 해제 창 등을 기다리며 멈추면 확인 전체가 멈춘다. 10초 넘게 걸리면 끝내고 토큰 없음으로 본다
+        // (Windows판도 같은 10초 제한을 둔다).
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
         do {
             try process.run()
         } catch {
             return nil
         }
-        process.waitUntilExit()
+        if finished.wait(timeout: .now() + ghTimeout) == .timedOut {
+            process.terminate()
+            return nil
+        }
         guard process.terminationStatus == 0 else { return nil }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)

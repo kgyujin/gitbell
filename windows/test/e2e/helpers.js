@@ -11,9 +11,18 @@ const { _electron: electron } = require('playwright');
 const APP_DIR = path.resolve(__dirname, '..', '..');
 const RESULTS = path.join(APP_DIR, 'test-results');
 
-/** GitHub CLI 로그인이 테스트에 섞이지 않게, 빈 gh 설정 폴더와 토큰 없는 환경을 쓴다. */
+/**
+ * GitHub CLI 로그인이 테스트에 섞이지 않게, 빈 gh 설정 폴더와 토큰 없는 환경을 쓴다.
+ * 앱 데이터 폴더도 실행마다 새로 만든다. 앞 테스트의 앱이 아직 끝나는 중이어도 중복 실행 잠금이 겹치지 않는다.
+ */
 function isolatedEnv(extra = {}) {
-  const env = { ...process.env, GH_CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'gitbell-gh-')), GITBELL_LANG: 'en', ...extra };
+  const env = {
+    ...process.env,
+    GH_CONFIG_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'gitbell-gh-')),
+    GITBELL_DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'gitbell-data-')),
+    GITBELL_LANG: 'en',
+    ...extra,
+  };
   delete env.GH_TOKEN;
   delete env.GITHUB_TOKEN;
   return env;

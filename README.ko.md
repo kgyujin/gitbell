@@ -43,7 +43,7 @@ npx gitbell
 > [!NOTE]
 > Windows 10 이상과 Node.js 22.12 이상이 필요합니다. 처음 설치할 때 Electron(약 100MB)을 받습니다. 토큰은 내 Windows 계정으로 암호화해 이 PC에만 저장하고, 설정과 기록은 `%APPDATA%\GitBell`에 둡니다.
 
-**GitHub 연결.** [GitHub CLI](https://cli.github.com)를 쓰고 있다면 따로 할 일이 없습니다. 쓰지 않는다면 `repo`, `notifications`, `read:org` 권한을 준 [개인 액세스 토큰](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell)을 앱에 붙여넣으세요.
+**GitHub 연결.** [GitHub CLI](https://cli.github.com)를 쓰고 있다면 따로 할 일이 없습니다. 쓰지 않는다면 `repo`, `notifications`, `read:org` 권한을 준 [개인 액세스 토큰](https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell)을 앱에 붙여넣으세요. 세분화 토큰(fine-grained)은 알림함을 읽지 못해서, 이 토큰을 쓰면 최근 push가 있는 저장소만 확인합니다.
 
 ## 기능
 
@@ -51,8 +51,8 @@ npx gitbell
 - **원하는 알림만.** macOS 알림 배너로 알리고 소리는 켜고 끌 수 있습니다. 종류별로 끄거나 내가 올린 PR 소식만 받을 수도 있습니다.
 - **빠르게 찾기.** 종류, 저장소, 안 읽음, **내 PR**(내 PR에 다른 사람이 한 활동)로 거릅니다. 정렬은 최신순, 저장소별, 안 읽은 것 먼저로 하고 검색은 제목, 사람, `#번호`로 합니다.
 - **소음 줄이기.** 내 활동은 기본으로, 시끄러운 저장소는 우클릭으로 숨깁니다. 봇 계정은 스위치 하나로 모두 숨깁니다.
-- **개인정보 보호.** GitHub과만 통신하고 새 버전 확인을 위해 하루 두 번 npm에 접속합니다. 토큰은 macOS 키체인에만 저장합니다.
-- **한국어·영어.** macOS 언어 설정을 따릅니다.
+- **개인정보 보호.** GitHub과만 통신하고 새 버전 확인을 위해 하루 두 번 npm에 접속합니다. 토큰은 이 컴퓨터에만 둡니다(macOS는 키체인, Windows는 내 계정으로 암호화한 파일).
+- **한국어·영어.** 시스템 언어 설정을 따릅니다.
 
 ## 사용 팁
 

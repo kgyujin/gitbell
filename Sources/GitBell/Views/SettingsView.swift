@@ -190,7 +190,21 @@ private struct GeneralSection: View {
             RowDivider()
             SwitchRow(symbol: "power", title: L10n.string("Open at login"), isOn: Binding(
                 get: { model.launchAtLogin }, set: { model.launchAtLogin = $0 }))
+            if model.launchAtLoginNeedsAttention {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text("Allow GitBell in System Settings → General → Login Items.")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 4)
+                    LinkButton(title: L10n.string("Open Login Items")) { model.openLoginItemsSettings() }
+                }
+                .font(.system(size: 11))
+                .padding(.leading, 24)
+                .padding(.bottom, 8)
+            }
         }
+        .onAppear { model.refreshLaunchAtLoginStatus() }
     }
 }
 
@@ -301,6 +315,7 @@ struct OnboardingView: View {
 }
 
 private struct TokenField: View {
+    @EnvironmentObject private var model: AppModel
     @Binding var token: String
     let onSave: () -> Void
 
@@ -312,6 +327,11 @@ private struct TokenField: View {
                     .onSubmit(onSave)
                 Button("Save", action: onSave)
                     .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if model.tokenSaveFailed {
+                Text("Couldn't save the token. Try again.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
             }
             LinkButton(title: L10n.string("Create a token on GitHub (repo, notifications, read:org)")) {
                 NSWorkspace.shared.open(tokenCreationURL)

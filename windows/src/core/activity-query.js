@@ -26,9 +26,13 @@ function isOnMyPullRequest(event, me) {
   return me !== '' && event.prAuthor === me && event.actor !== me;
 }
 
-/** 검색 대상: 본문, 저장소(전체 이름), 사람, 브랜치, '#번호', 종류 이름(영문 키). */
-function searchText(event) {
-  return [event.title, event.repo, event.actor, event.branch || '', event.number != null ? `#${event.number}` : '', event.kind]
+/**
+ * 검색 대상: 본문, 저장소(전체 이름), 사람, 브랜치, '#번호', 종류 이름(영문 키와 화면 언어 이름).
+ * kindLabels는 { prMerged: '머지됨', ... }처럼 화면에 보이는 종류 이름이다. 없으면 영문 키만 쓴다.
+ */
+function searchText(event, kindLabels = {}) {
+  return [event.title, event.repo, event.actor, event.branch || '', event.number != null ? `#${event.number}` : '',
+    event.kind, kindLabels[event.kind] || '']
     .join(' ')
     .toLowerCase();
 }
@@ -42,7 +46,7 @@ function filter(query, events) {
     if (query.mineOnly && !isOnMyPullRequest(event, query.me || '')) return false;
     if (terms.length) {
       // 낱말마다 어딘가에 들어 있으면 된다. "web merge"처럼 저장소와 내용을 섞어 찾을 수 있다.
-      const haystack = searchText(event);
+      const haystack = searchText(event, query.kindLabels);
       if (!terms.every((term) => haystack.includes(term))) return false;
     }
     return true;

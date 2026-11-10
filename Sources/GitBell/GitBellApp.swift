@@ -50,5 +50,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { SnapshotRenderer.runIfRequested() }
         Notifier.shared.setUp()
         Task { @MainActor in AppModel.shared.start() }
+        installEscapeKey()
+    }
+
+    /// Esc를 단계별로 처리한다(Windows판과 같은 순서): 검색 닫기 → 설정에서 뒤로 → 패널 닫기.
+    /// 검색창에 커서가 없을 때도 동작하도록 패널 창의 키 입력을 직접 본다.
+    private func installEscapeKey() {
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+                  let window = event.window else { return event }
+            // 화면 상태는 메인 액터에서만 바꾼다. 이벤트 자체는 밖으로 넘기지 않는다.
+            let closesWindow = MainActor.assumeIsolated { () -> Bool in
+                let model = AppModel.shared
+                if model.showingSearch {
+                    model.query.search = ""
+                    model.showingSearch = false
+                    return false
+                }
+                if model.showingSettings {
+                    model.showingSettings = false
+                    return false
+                }
+                return true
+            }
+            if closesWindow { window.close() }
+            return nil
+        }
     }
 }

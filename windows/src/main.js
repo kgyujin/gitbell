@@ -17,7 +17,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
   app, BrowserWindow, Tray, Menu, Notification, nativeImage, nativeTheme, ipcMain, shell, clipboard, safeStorage,
-  screen, systemPreferences, dialog,
+  screen, systemPreferences, dialog, powerMonitor,
 } = require('electron');
 
 const { AppModel, URLS } = require('./app-model');
@@ -42,7 +42,13 @@ const TASKS = ['--create-shortcut', '--quit', '--uninstall', '--uninstall-app'];
 const task = TASKS.find(has);
 
 if (process.platform === 'win32') app.setAppUserModelId(BUNDLE_ID);
-if (process.env.GITBELL_DATA_DIR) app.setPath('userData', path.resolve(process.env.GITBELL_DATA_DIR));
+if (process.env.GITBELL_DATA_DIR) {
+  app.setPath('userData', path.resolve(process.env.GITBELL_DATA_DIR));
+} else if (isDemo) {
+  // 데모는 실제 데이터 폴더(%APPDATA%\GitBell, macOS에서는 macOS판과 같은 폴더)를 건드리지 않고,
+  // 실행 중인 실제 GitBell과 중복 실행 잠금도 나누지 않도록 임시 폴더를 쓴다.
+  app.setPath('userData', path.join(app.getPath('temp'), 'GitBell-demo'));
+}
 
 const shortcutPath = () => path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'GitBell.lnk');
 // Windows는 args를 따옴표 없이 이어 붙여 레지스트리에 넣으므로, 사용자 폴더에 빈칸이 있어도 되게 직접 감싼다.
@@ -172,6 +178,8 @@ function start() {
   });
   registerIPC();
   model.start();
+  // 잠자기에서 깨면 다음 주기를 기다리지 않고 바로 확인한다(네트워크가 붙을 시간을 조금 준다).
+  powerMonitor.on('resume', () => setTimeout(() => model.refresh(), 5000));
 }
 
 // MARK: 패널
@@ -405,6 +413,7 @@ function registerIPC() {
     return {
       locale: l10n.locale,
       strings: l10n.korean ? Object.fromEntries(require('./l10n').loadKoreanStrings()) : {},
+      singular: require('./l10n').SINGULAR,
       accent: /^[0-9a-f]{6}/i.test(accent) ? `#${accent.slice(0, 6)}` : null,
       maxHeight: maxPanelHeight(),
       view: model.viewModel(),

@@ -24,6 +24,8 @@ public struct ActivityQuery: Equatable, Sendable {
     public var sort: SortMode = .newest
     /// 내 로그인 이름. mineOnly 판단에만 쓰며 저장하지 않는다.
     public var me = ""
+    /// 화면 언어의 종류 이름(예: .prMerged → "머지됨"). 검색에 쓰며 저장하지 않는다.
+    public var kindLabels: [EventKind: String] = [:]
 
     public init(category: EventCategory? = nil, repo: String? = nil, unreadOnly: Bool = false,
                 mineOnly: Bool = false, search: String = "", sort: SortMode = .newest) {
@@ -50,7 +52,7 @@ public struct ActivityQuery: Equatable, Sendable {
             if unreadOnly, !event.isUnread { return false }
             if mineOnly, !event.isOnMyPullRequest(me: me) { return false }
             if !terms.isEmpty {
-                let haystack = Self.searchText(event)
+                let haystack = Self.searchText(event, kindLabels: kindLabels)
                 // 낱말마다 어딘가에 들어 있으면 된다. "web merge"처럼 저장소와 내용을 섞어 찾을 수 있다.
                 if !terms.allSatisfy(haystack.contains) { return false }
             }
@@ -58,10 +60,11 @@ public struct ActivityQuery: Equatable, Sendable {
         }
     }
 
-    /// 검색 대상: 본문, 저장소(전체 이름), 사람, 브랜치, '#번호', 종류 이름(영문 키).
-    static func searchText(_ event: ActivityEvent) -> String {
+    /// 검색 대상: 본문, 저장소(전체 이름), 사람, 브랜치, '#번호', 종류 이름(영문 키와 화면 언어 이름).
+    /// 화면 언어 이름이 있어야 '머지', '승인'처럼 한국어로도 찾을 수 있다.
+    static func searchText(_ event: ActivityEvent, kindLabels: [EventKind: String] = [:]) -> String {
         [event.title, event.repo, event.actor, event.branch ?? "",
-         event.number.map { "#\($0)" } ?? "", event.kind.rawValue]
+         event.number.map { "#\($0)" } ?? "", event.kind.rawValue, kindLabels[event.kind] ?? ""]
             .joined(separator: " ")
             .lowercased()
     }
