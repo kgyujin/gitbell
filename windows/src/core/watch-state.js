@@ -95,6 +95,36 @@ function markUnread(state, id) {
   }
 }
 
+/** 여러 항목을 한 번에 읽음으로 바꾼다(묶음의 '읽음 표시', '모두 읽음'). */
+function markReadIds(state, ids) {
+  const set = new Set(ids);
+  for (const event of state.history) {
+    if (set.has(event.id)) event.isUnread = false;
+  }
+}
+
+/** '되돌리기': 방금 읽음으로 바꾼 항목을 다시 안 읽음으로. */
+function markUnreadIds(state, ids) {
+  const set = new Set(ids);
+  for (const event of state.history) {
+    if (set.has(event.id)) event.isUnread = true;
+  }
+}
+
+/**
+ * 항목을 열었을 때: 같은 PR·이슈(저장소 + 번호)의 안 읽은 항목도 함께 읽음으로 바꾼다.
+ * 페이지를 열면 그 PR의 리뷰·댓글도 함께 보게 되기 때문이다. 번호가 없는 항목(push 등)은 그 항목만 바꾼다.
+ * GitHub에서 PR과 이슈는 저장소 안에서 번호를 나눠 쓰므로 저장소 + 번호로 같은 대화를 가린다.
+ */
+function markThreadRead(state, id) {
+  const opened = state.history.find((event) => event.id === id);
+  if (!opened) return;
+  if (opened.number == null) return markRead(state, id);
+  for (const event of state.history) {
+    if (event.repo === opened.repo && event.number === opened.number) event.isUnread = false;
+  }
+}
+
 /**
  * 새로고침 결과(refreshed)에 지금 상태(current)의 읽음 표시를 옮겨 온 새 상태를 돌려준다.
  * 새로고침이 도는 몇 초 동안 사용자가 바꾼 읽음 표시를 결과가 덮어쓰지 않게 한다.
@@ -147,6 +177,9 @@ module.exports = {
   markRead,
   markRepoRead,
   markUnread,
+  markReadIds,
+  markUnreadIds,
+  markThreadRead,
   adoptingReadMarks,
   update,
   unreadCount,

@@ -103,7 +103,7 @@
 
 /* 목록 상태 */
 "Loading your GitHub activity…" = "GitHub 활동을 불러오는 중…";
-"No activity in the last day" = "최근 하루 동안 새 활동이 없습니다";
+"No activity yet" = "아직 활동이 없습니다";
 "New pull requests, reviews, merges and commits will show up here." = "새 PR, 리뷰, 머지, 커밋이 생기면 여기에 뜹니다.";
 "Checking…" = "확인 중…";
 "Checked %@ · %lld repositories" = "%@ 확인 · 저장소 %lld개";
@@ -155,3 +155,15 @@
 "Checked %@ · %lld repository" = "%@ 확인 · 저장소 %lld개";
 "Couldn't read %lld repository:" = "저장소 %lld개를 읽지 못했습니다:";
 "%lld new activity" = "새 활동 %lld개";
+
+/* 만료된 토큰 다시 연결 */
+"The GitHub CLI login has expired." = "GitHub CLI 로그인이 만료됐습니다.";
+"The saved token is invalid or expired." = "저장한 토큰이 잘못됐거나 만료됐습니다.";
+"Run gh auth login again, or paste a new token below." = "gh auth login을 다시 실행하거나, 아래에 새 토큰을 붙여넣으세요.";
+"Paste a new token below." = "아래에 새 토큰을 붙여넣으세요.";
+"Open Settings" = "설정 열기";
+
+/* 읽음 표시 되돌리기 */
+"Marked %lld items as read" = "%lld개를 읽음으로 표시했습니다";
+"Marked %lld item as read" = "%lld개를 읽음으로 표시했습니다";
+"Undo" = "되돌리기";

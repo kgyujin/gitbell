@@ -1,7 +1,7 @@
 // 패널을 PNG로 그린다. README 스크린숏과 화면 확인에 쓴다. GitHub에는 요청하지 않는다.
 //
 //   GitBell.app/Contents/MacOS/GitBell --snapshot out.png [--demo] [--dark] [--by-repo | --unread-first] [--mine]
-//                                      [--settings] [--onboarding]
+//                                      [--settings] [--onboarding] [--expired] [--undo]
 //   언어를 바꾸려면 뒤에 -AppleLanguages '(en)'을 붙인다.
 //
 // --demo는 가상 저장소(acme/…)와 가상 사람으로 채운다. 실제 저장소 이름이 이미지에 남지 않게 한다.
@@ -52,6 +52,9 @@ enum SnapshotRenderer {
         if args.contains("--settings") { model.showingSettings = true }
         if args.contains("--update") { model.simulateUpdate("9.9.9") }
         if args.contains("--onboarding") { model.simulateNoToken() }
+        if args.contains("--expired") { model.simulateExpiredToken() }
+        // 안 읽은 항목 둘을 읽음으로 바꿔 '되돌리기' 띠를 보인다.
+        if args.contains("--undo") { model.markRead(events: Array(model.state.history.filter(\.isUnread).prefix(2))) }
 
         let view = PanelView()
             .environmentObject(model)

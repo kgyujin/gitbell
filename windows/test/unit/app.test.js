@@ -19,11 +19,12 @@ const { user } = require('./fixtures');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 
-function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, savedState = null, savedSettings = null } = {}) {
+function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, savedState = null, savedSettings = null, undoMs } = {}) {
   const saved = { state: savedState, settings: savedSettings };
   const opened = [];
   const copied = [];
   const notified = [];
+  const dismissed = [];
   let tokenValue = token;
   const model = new AppModel({
     store: {
@@ -46,7 +47,11 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
         return JSON.parse(JSON.stringify(value));
       },
     }),
-    notifier: { post: (events, sound) => notified.push({ events, sound }), postTest: () => notified.push('test') },
+    notifier: {
+      post: (events, sound) => notified.push({ events, sound }),
+      postTest: () => notified.push('test'),
+      dismiss: (ids, includeSummaries) => dismissed.push({ ids, includeSummaries }),
+    },
     system: {
       openURL: (url) => opened.push(url),
       copyText: (text) => copied.push(text),
@@ -57,8 +62,9 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
     version: '0.4.0',
     now: () => '2026-11-09T06:00:00Z',
     fetchLatestVersion: async () => '0.5.0',
+    undoMs,
   });
-  return { model, saved, opened, copied, notified };
+  return { model, saved, opened, copied, notified, dismissed };
 }
 
 const pushRoutes = (activity) => ({
@@ -444,4 +450,81 @@ test('제거: 폴더 크기(KB)', () => {
   fs.writeFileSync(path.join(dir, 'a'), Buffer.alloc(1024));
   fs.writeFileSync(path.join(dir, 'sub', 'b'), Buffer.alloc(1500));
   assert.equal(folderSizeKB(dir), 3);
+});
+
+test('AppModel: 토큰이 만료되면 설정에서 바로 새 토큰을 넣을 수 있다', async () => {
+  for (const [source, text, hint] of [
+    ['saved', 'The saved token is invalid or expired.', 'Paste a new token below.'],
+    ['githubCLI', 'The GitHub CLI login has expired.', 'Run gh auth login again, or paste a new token below.'],
+  ]) {
+    const routes = pushRoutes([push(1, 'amy')]);
+    const { model } = harness({ token: { value: 'tok', source }, routes });
+    await model.refresh();
+    const connected = model.viewModel();
+    assert.equal(connected.account.isConnected, true);
+    assert.equal(connected.account.hint, '');
+    assert.equal(connected.account.needsToken, false, '연결된 동안에는 입력칸이 없다');
+    assert.equal(connected.problemOpensSettings, false);
+
+    routes['user/repos'] = new GitHubError('unauthorized');
+    await model.refresh();
+    const view = model.viewModel();
+    assert.equal(view.showsOnboarding, false, '기록이 있으면 목록을 그대로 보인다');
+    assert.equal(view.account.isConnected, false);
+    assert.equal(view.account.text, text, source);
+    assert.equal(view.account.hint, hint, source);
+    assert.equal(view.account.needsToken, true, '만료되면 새 토큰 입력칸을 보인다');
+    assert.equal(view.problemOpensSettings, true, '문제 안내에서 설정으로 바로 간다');
+  }
+});
+
+test('AppModel: 읽음으로 바꾼 항목의 알림을 알림 센터에서 지운다', async () => {
+  const routes = pushRoutes([push(1, 'amy')]);
+  const { model, dismissed } = harness({ routes });
+  await model.refresh();
+  routes['repos/org/repo/activity'] = [push(1, 'amy'), push(2, 'bob'), push(3, 'cid')];
+  await model.refresh();
+  assert.equal(model.unreadCount, 2);
+  const [first, second] = model.state.history.filter((event) => event.isUnread).map((event) => event.id);
+
+  model.markRead(first);
+  assert.deepEqual(dismissed, [{ ids: [first], includeSummaries: false }], '아직 안 읽은 항목이 있으면 요약 알림은 남긴다');
+  model.markRead(first);
+  assert.equal(dismissed.length, 1, '이미 읽은 항목은 다시 지우지 않는다');
+  model.markRepoRead('org/repo');
+  assert.deepEqual(dismissed[1], { ids: [second], includeSummaries: true }, '모두 읽으면 요약 알림도 지운다');
+});
+
+test('AppModel: 묶음 하나를 읽음으로 바꾸고 되돌린다', async () => {
+  const routes = pushRoutes([push(1, 'amy')]);
+  const { model } = harness({ routes });
+  await model.refresh();
+  routes['repos/org/repo/activity'] = [push(1, 'amy'), push(2, 'bob'), push(3, 'cid')];
+  await model.refresh();
+  assert.equal(model.unreadCount, 2);
+  assert.equal(model.viewModel().readUndo, null);
+
+  const today = model.viewModel().sections[0];
+  model.markSectionRead(today.id);
+  assert.equal(model.unreadCount, 0);
+  assert.deepEqual(model.viewModel().readUndo, { text: 'Marked 2 items as read' });
+
+  model.undoMarkRead();
+  assert.equal(model.unreadCount, 2, '되돌리면 다시 안 읽음');
+  assert.equal(model.viewModel().readUndo, null);
+
+  model.markRead(model.state.history.find((event) => event.isUnread).id);
+  assert.equal(model.viewModel().readUndo, null, '한 항목만 읽음으로 바꾸면 되돌리기를 띄우지 않는다');
+});
+
+test('AppModel: 되돌리기는 잠시 뒤 사라진다', async () => {
+  const routes = pushRoutes([push(1, 'amy')]);
+  const { model } = harness({ routes, undoMs: 20 });
+  await model.refresh();
+  routes['repos/org/repo/activity'] = [push(1, 'amy'), push(2, 'bob')];
+  await model.refresh();
+  model.markRead();
+  assert.notEqual(model.viewModel().readUndo, null);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(model.viewModel().readUndo, null);
 });

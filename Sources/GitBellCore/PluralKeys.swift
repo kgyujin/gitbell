@@ -10,6 +10,7 @@ public enum PluralKeys {
         "Checked %@ · %lld repositories": "Checked %@ · %lld repository",
         "Couldn't read %lld repositories:": "Couldn't read %lld repository:",
         "%lld new activities": "%lld new activity",
+        "Marked %lld items as read": "Marked %lld item as read",
     ]
 
     /// 쓸 키를 고른다. 번역이 있으면(한국어) 원래 키, 영어에서 %lld 자리 값이 1이면 단수형 키.

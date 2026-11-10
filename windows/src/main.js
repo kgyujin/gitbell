@@ -141,6 +141,10 @@ let lastHiddenAt = 0;
 let quitting = false;
 let lastTrayKey = '';
 const liveNotifications = new Set();
+/** 항목 id → 그 항목의 알림. 읽음으로 바꾸면 알림 센터에서도 지운다. */
+const notificationsById = new Map();
+/** 여러 항목을 묶은 요약 알림. */
+const summaryNotifications = new Set();
 
 function start() {
   l10n = createL10n({ korean: prefersKorean(app.getPreferredSystemLanguages()) });
@@ -149,7 +153,7 @@ function start() {
     store: isDemo ? createMemoryStore() : createFileStore(dataDir),
     tokens: createTokenStore({ file: path.join(dataDir, 'token.bin'), safeStorage }),
     createAPI: (token) => createGitHubAPI({ token, baseURL: process.env.GITBELL_API_URL || undefined }),
-    notifier: { post: postNotifications, postTest: postTestNotification },
+    notifier: { post: postNotifications, postTest: postTestNotification, dismiss: dismissNotifications },
     system: {
       openURL: openHTTPS,
       copyText: (text) => clipboard.writeText(text),
@@ -330,25 +334,44 @@ function openHTTPS(url) {
   if (/^https:\/\//i.test(url)) shell.openExternal(url);
 }
 
-function showNotification({ title, body, playsSound, url, id }) {
+/** onClick이 있으면 주소 대신 그것을 한다(요약 알림은 GitBell 패널을 연다). */
+function showNotification({ title, body, playsSound, url, id, onClick, summary = false }) {
   if (!Notification.isSupported()) return;
   const notification = new Notification({ title, body, silent: !playsSound, icon: ICON });
   // 알림 객체가 사라지면 누름 이벤트도 사라져서, 닫힐 때까지 붙잡아 둔다.
   liveNotifications.add(notification);
+  if (id) notificationsById.set(id, notification);
+  if (summary) summaryNotifications.add(notification);
   notification.on('click', () => {
-    if (url) openHTTPS(url);
-    if (id) model.markRead(id);
+    if (onClick) onClick();
+    else if (url) openHTTPS(url);
+    // 알림을 눌러 페이지를 열었으니 같은 PR의 다른 안 읽은 항목도 읽음이 된다.
+    if (id) model.markOpened(id);
   });
-  notification.on('close', () => liveNotifications.delete(notification));
+  notification.on('close', () => {
+    liveNotifications.delete(notification);
+    summaryNotifications.delete(notification);
+    if (id && notificationsById.get(id) === notification) notificationsById.delete(id);
+  });
   notification.show();
+}
+
+/** GitBell에서 읽은 항목의 알림을 알림 센터에서 지운다. */
+function dismissNotifications(ids, includeSummaries) {
+  for (const id of ids) {
+    const notification = notificationsById.get(id);
+    if (notification) notification.close();
+  }
+  if (includeSummaries) for (const notification of [...summaryNotifications]) notification.close();
 }
 
 /** 한 번에 새 항목이 많으면(5개 초과) 요약 알림 하나로 묶는다. */
 function postNotifications(events, playsSound) {
   if (events.length > NOTIFICATION_LIMIT) {
     const repos = [...new Set(events.map((event) => repoName(event.repo)))].sort().join(', ');
+    // 많이 쌓였을 때는 GitHub 알림 페이지보다 GitBell 목록이 보기 쉬워 패널을 연다.
     showNotification({ title: 'GitBell', body: `${l10n.format('%lld new activities', events.length)}\n${repos}`,
-      playsSound, url: URLS.notifications });
+      playsSound, onClick: showPanel, summary: true });
     return;
   }
   for (const event of events) {
@@ -385,6 +408,8 @@ function registerIPC() {
     open: (id) => model.open(id),
     markRead: (id) => model.markRead(id),
     markRepoRead: (repo) => model.markRepoRead(repo),
+    markSectionRead: (sectionId) => model.markSectionRead(sectionId),
+    undoMarkRead: () => model.undoMarkRead(),
     markUnread: (id) => model.markUnread(id),
     copyLink: (id) => model.copyLink(id),
     hideRepository: (repo) => model.hideRepository(repo),

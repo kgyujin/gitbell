@@ -28,6 +28,7 @@ struct PanelView: View {
                     Divider()
                     ActivityList()
                     Divider()
+                    UndoBanner()
                     if model.availableUpdate != nil { UpdateBanner() }
                     FooterView()
                 }
@@ -230,6 +231,12 @@ private struct ProblemBanner: View {
                 Text(message).font(.system(size: 11)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
+                // 토큰 문제는 설정에서 고친다. 안내만 하지 않고 바로 갈 수 있게 한다.
+                if model.problem == .unauthorized {
+                    LinkButton(title: L10n.string("Open Settings")) { model.showingSettings = true }
+                        .font(.system(size: 11, weight: .medium))
+                        .fixedSize()
+                }
             }
             .padding(8)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.1)))
@@ -298,7 +305,9 @@ private struct ActivityList: View {
         ForEach(sections) { section in
             Section {
                 ForEach(section.events) { event in
-                    EventRow(event: event, showsRepository: !groupedByRepo) { model.open(event) }
+                    EventRow(event: event, showsRepository: !groupedByRepo, markRead: { model.markRead(event.id) }) {
+                        model.open(event)
+                    }
                         .contextMenu { EventMenu(event: event) }
                 }
             } header: {
@@ -374,16 +383,12 @@ private struct SectionHeader: View {
                 .help(repo)
                 Text("\(section.events.count)").foregroundStyle(.tertiary)
                 Spacer()
-                if section.unreadCount > 0 {
-                    Button { model.markRead(repo: repo) } label: {
-                        Text("Mark as read").foregroundStyle(.tint)
-                    }
-                    .buttonStyle(.plain)
-                }
+                markReadButton
             } else {
                 Text(verbatim: L10n.sectionTitle(section.key)).foregroundStyle(.secondary)
                 Text("\(section.events.count)").foregroundStyle(.tertiary)
                 Spacer()
+                markReadButton
             }
         }
         .font(.system(size: 11, weight: .semibold))
@@ -391,6 +396,43 @@ private struct SectionHeader: View {
         .padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .panelBackground()
+    }
+}
+
+extension SectionHeader {
+    /// 저장소 묶음뿐 아니라 날짜·안 읽음 묶음도 한 번에 읽음으로 바꿀 수 있다(보이는 항목만, 되돌릴 수 있다).
+    @ViewBuilder var markReadButton: some View {
+        if section.unreadCount > 0 {
+            Button { model.markRead(events: section.events) } label: {
+                Text("Mark as read").foregroundStyle(.tint)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+/// 여러 항목을 읽음으로 바꾼 직후 잠시 보이는 '되돌리기'.
+private struct UndoBanner: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        if let undo = model.readUndo {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+                Text(L10n.format("Marked %lld items as read", undo.ids.count))
+                Spacer()
+                Button { model.undoMarkRead() } label: {
+                    Text("Undo").fontWeight(.semibold).foregroundStyle(.tint)
+                }
+                .buttonStyle(.plain)
+                // 검색창을 연 동안의 ⌘Z는 글자 되돌리기로 둔다.
+                .keyboardShortcut(model.showingSearch ? nil : KeyboardShortcut("z", modifiers: .command))
+            }
+            .font(.system(size: 11))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.05))
+        }
     }
 }
 
@@ -402,7 +444,7 @@ private struct EmptyStateView: View {
             Image(systemName: isFirstLoad ? "hourglass" : "checkmark.circle")
                 .font(.system(size: 28))
                 .foregroundStyle(.secondary)
-            Text(isFirstLoad ? "Loading your GitHub activity…" : "No activity in the last day")
+            Text(isFirstLoad ? "Loading your GitHub activity…" : "No activity yet")
                 .font(.system(size: 13, weight: .medium))
             if !isFirstLoad {
                 Text("New pull requests, reviews, merges and commits will show up here.")
@@ -525,6 +567,8 @@ private struct Chip: View {
             .background(Capsule().fill(isSelected ? Color.accentColor : Color.primary.opacity(hovering ? 0.1 : 0.06)))
         }
         .buttonStyle(.plain)
+        // 색으로만 보이는 '골라짐'을 VoiceOver도 읽게 한다.
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { hovering = $0 }
     }
 }
@@ -613,6 +657,7 @@ private struct OptionRow: View {
             .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(hovering ? 0.08 : 0)))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .onHover { hovering = $0 }
     }
 }
