@@ -96,7 +96,6 @@ private struct SearchField: View {
             TextField("Search title, repository, person, #number", text: $model.query.search)
                 .textFieldStyle(.plain)
                 .focused($focused)
-                .onExitCommand { model.query.search = ""; model.showingSearch = false }
             if !model.query.search.isEmpty {
                 Button { model.query.search = "" } label: {
                     Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)

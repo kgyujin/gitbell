@@ -118,10 +118,19 @@ async function resolvePush(api, event) {
   try {
     const commit = await api.get(`repos/${event.repo}/commits/${event.after}`);
     resolved.title = firstLine(commit.commit.message);
-  } catch {
-    // 제목 없이 보인다.
+  } catch (error) {
+    // 한도·네트워크처럼 잠시 뒤 될 수 있는 실패는 '다 읽음'으로 두지 않아 다음 확인 때 다시 읽는다
+    // (예전에는 어떤 실패든 다 읽음으로 표시해, 커밋 제목이 영영 비었다). 커밋이 사라진 경우(404 등)는 그대로 둔다.
+    if (isTemporary(error)) resolved.detailResolved = false;
   }
   return resolved;
 }
 
-module.exports = { refresh, collect, snapshot, resolvePush, iso };
+/** 잠시 뒤 다시 하면 될 수 있는 실패인지(한도·네트워크·서버 오류). */
+function isTemporary(error) {
+  if (!error) return false;
+  if (error.kind === 'rateLimited' || error.kind === 'network') return true;
+  return error.kind === 'http' && error.status >= 500;
+}
+
+module.exports = { refresh, collect, snapshot, resolvePush, isTemporary, iso };

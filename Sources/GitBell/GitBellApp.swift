@@ -59,6 +59,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard event.keyCode == 53, event.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
                   let window = event.window else { return event }
+            // 저장소·정렬 고르기 팝오버가 열려 있으면 그것부터 닫는다(검색창보다 위에 떠 있다).
+            if window.className.contains("Popover") {
+                window.close()
+                return nil
+            }
             // 화면 상태는 메인 액터에서만 바꾼다. 이벤트 자체는 밖으로 넘기지 않는다.
             let closesWindow = MainActor.assumeIsolated { () -> Bool in
                 let model = AppModel.shared

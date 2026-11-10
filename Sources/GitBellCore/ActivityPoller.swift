@@ -139,10 +139,25 @@ public struct ActivityPoller: Sendable {
             return resolved
         }
         // 강제 push 뒤에는 before 커밋이 사라져 compare가 실패할 수 있어 마지막 커밋만 읽는다.
-        if let commit = try? await api.get("repos/\(event.repo)/commits/\(after)", as: GHCommit.self) {
+        do {
+            let commit = try await api.get("repos/\(event.repo)/commits/\(after)", as: GHCommit.self)
             resolved.title = TextPreview.firstLine(commit.commit.message)
+        } catch let error as GitHubError where Self.isTemporary(error) {
+            // 한도·네트워크처럼 잠시 뒤 될 수 있는 실패는 '다 읽음'으로 두지 않아 다음 확인 때 다시 읽는다.
+            // (예전에는 어떤 실패든 다 읽음으로 표시해, 커밋 제목이 영영 비었다.)
+            resolved.detailResolved = false
+        } catch {
+            // 커밋이 사라진 경우(404 등)는 다시 읽어도 안 되므로 그대로 둔다.
         }
         return resolved
+    }
+
+    static func isTemporary(_ error: GitHubError) -> Bool {
+        switch error {
+        case .rateLimited, .network: return true
+        case let .http(status, _): return status >= 500
+        case .unauthorized: return false
+        }
     }
 
     static func iso(_ date: Date) -> String {

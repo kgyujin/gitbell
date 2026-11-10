@@ -394,3 +394,22 @@ final class RateLimitTests: XCTestCase {
         XCTAssertEqual(state.lastChecked, date("2026-11-09T05:00:00Z"))
     }
 }
+
+final class PushTitleRetryTests: XCTestCase {
+    private func push() -> ActivityEvent {
+        ActivityEvent(id: "o/r#act:1", repo: "o/r", kind: .push, time: Date(), actor: "amy", branch: "main", title: "",
+                      url: URL(string: "https://github.com/o/r")!, before: EventBuilder.zeroSHA, after: "bbb",
+                      detailResolved: false)
+    }
+
+    func testTemporaryFailureIsRetriedLater() async {
+        let api = FailingRouteGitHub(base: FakeGitHub(routes: []), failing: ["repos/o/r/commits": .rateLimited(resetAt: nil)])
+        let resolved = await ActivityPoller(api: api).resolvePush(push())
+        XCTAssertFalse(resolved.detailResolved, "한도에 걸리면 다음 확인 때 다시 읽는다")
+    }
+
+    func testMissingCommitIsNotRetried() async {
+        let resolved = await ActivityPoller(api: FakeGitHub(routes: [])).resolvePush(push())   // 404
+        XCTAssertTrue(resolved.detailResolved, "사라진 커밋은 다시 읽어도 안 된다")
+    }
+}

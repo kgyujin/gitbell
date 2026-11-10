@@ -127,3 +127,12 @@ test('설치기: 라이선스 미동의·깨진 도구·디스크 부족을 알�
   assert.match(explainBuildProblem('error: No space left on device').problem, /disk space/);
   assert.equal(explainBuildProblem('error: some compile error in AppModel.swift'), null, '모르는 원인은 원문을 보여 준다');
 });
+
+test('push 커밋 제목: 한도·네트워크 실패는 다음에 다시 읽고, 사라진 커밋(404)은 그만 읽는다', async () => {
+  const pushEvent = makeEvent({ id: 'o/r#act:1', repo: 'o/r', kind: 'push', time: '2026-11-09T05:30:00Z', actor: 'amy',
+    branch: 'main', title: '', url: 'https://github.com/o/r', before: '0'.repeat(40), after: 'bbb', detailResolved: false });
+  const limited = { get: async () => { throw new GitHubError('rateLimited', '', 403, null); } };
+  assert.equal((await Poller.resolvePush(limited, pushEvent)).detailResolved, false);
+  const missing = { get: async () => { throw new GitHubError('http', 'Not Found', 404); } };
+  assert.equal((await Poller.resolvePush(missing, pushEvent)).detailResolved, true);
+});
