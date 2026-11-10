@@ -1,7 +1,7 @@
 {
   "name": "gitbell-windows",
   "productName": "GitBell",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "GitBell for Windows: GitHub activity in the system tray.",
   "main": "src/main.js",
