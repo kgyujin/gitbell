@@ -18,10 +18,10 @@ final class ReleaseReviewTests: XCTestCase {
         RepoSnapshot(
             pulls: decode("""
             [{"number":5,"title":"내 PR","html_url":"https://github.com/o/r/pull/5","user":{"login":"me"},
-              "head":{"ref":"feat/mine"},"created_at":"2026-11-08T00:00:00Z","updated_at":"\(recent)",
+              "head":{"ref":"feat/mine","repo":{"full_name":"o/r"}},"created_at":"2026-11-08T00:00:00Z","updated_at":"\(recent)",
               "merged_at":null,"closed_at":null,"merge_commit_sha":null},
              {"number":6,"title":"남의 PR","html_url":"https://github.com/o/r/pull/6","user":{"login":"amy"},
-              "head":{"ref":"feat/amy"},"created_at":"\(recent)","updated_at":"\(recent)",
+              "head":{"ref":"feat/amy","repo":{"full_name":"o/r"}},"created_at":"\(recent)","updated_at":"\(recent)",
               "merged_at":null,"closed_at":null,"merge_commit_sha":null}]
             """),
             reviewsByPR: [5: decode("""

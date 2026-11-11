@@ -109,10 +109,13 @@ test('WatchState: 다음 실행부터 다른 사람 활동을 한 번만 알린�
   assert.deepEqual(again, [], '같은 항목은 다시 알리지 않는다');
 });
 
-test('WatchState: 내 활동 포함', () => {
+test('WatchState: 내 활동 포함 — 목록에는 읽음으로 넣고 알리지 않는다', () => {
   const state = laterState();
   const notified = WatchState.apply(state, build(), { now, includeOwn: true }).map((e) => e.id);
-  assert.ok(notified.includes(id('pr-merged:32')));
+  const merged = state.history.find((e) => e.id === id('pr-merged:32'));
+  assert.ok(merged, '내 활동도 목록에는 보인다');
+  assert.equal(merged.isUnread, false, '내가 한 일은 안 읽음이 아니다');
+  assert.ok(!notified.includes(id('pr-merged:32')), '내가 한 일을 나에게 알리지 않는다');
 });
 
 test('WatchState: 본 항목은 만료되고 기록은 상한을 넘지 않는다', () => {

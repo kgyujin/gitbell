@@ -27,11 +27,14 @@ public enum EventBuilder {
         for pull in raw.pulls {
             guard let author = pull.user?.login else { continue }
             authorByNumber[pull.number] = author
-            if let branch = pull.head?.ref { authorByBranch[branch] = author }
+            // 이 저장소 안의 브랜치만 이어 준다. 포크에서 main 같은 이름으로 올린 PR이 있으면
+            // 원래 저장소의 main에 들어온 push가 모두 그 사람의 PR 활동으로 잘못 잡혔다.
+            if let head = pull.head, head.repo?.fullName == repo { authorByBranch[head.ref] = author }
         }
 
         var mergerBySHA: [String: GHUser] = [:]
-        for item in raw.activity where item.activityType == "pr_merge" {
+        // 머지 대기열(merge queue)로 머지한 것도 머지한 사람을 찾을 수 있게 함께 본다.
+        for item in raw.activity where item.activityType == "pr_merge" || item.activityType == "merge_queue_merge" {
             if let after = item.after, let actor = item.actor { mergerBySHA[after] = actor }
         }
 
@@ -106,7 +109,9 @@ public enum EventBuilder {
             case "branch_creation": kind = .branchCreated
             default: continue
             }
-            let branch = (item.ref ?? "").replacingOccurrences(of: "refs/heads/", with: "")
+            // 앞에 붙은 refs/heads/만 뗀다(브랜치 이름 안에 같은 글자가 있어도 그대로 둔다).
+            let ref = item.ref ?? ""
+            let branch = ref.hasPrefix("refs/heads/") ? String(ref.dropFirst("refs/heads/".count)) : ref
             let before = item.before ?? ""
             let after = item.after ?? ""
             let url: URL

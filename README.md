@@ -32,7 +32,7 @@ GitBell builds on your Mac, installs to `~/Applications`, and starts. Click the 
 
 ### Windows
 
-Run the same command in PowerShell or Command Prompt.
+Run the same command in PowerShell or Command Prompt. If PowerShell says running scripts is disabled, run `npx.cmd gitbell` instead.
 
 ```powershell
 npx gitbell
@@ -51,7 +51,7 @@ GitBell installs to `%LOCALAPPDATA%\Programs\GitBell`, adds a Start menu shortcu
 - **Notifications you control.** Native banners with optional sound. Turn each type on or off, or only hear about pull requests you opened.
 - **Find things fast.** Filter by type, repository, unread or **Mine** (others' activity on your PRs). Sort by newest, by repository or unread first. Search titles, people and `#numbers`.
 - **Less noise.** Your own activity is hidden by default. Hide a busy repository with a right-click, or hide all bot accounts with one switch.
-- **Private.** Talks only to GitHub, plus npm twice a day to check for updates. Your token stays on your computer: in the macOS Keychain, or encrypted for your Windows account.
+- **Private.** Talks only to GitHub, plus npm once an hour to check for updates. Your token stays on your computer: in the macOS Keychain, or encrypted for your Windows account.
 - **English and Korean.** Follows your system language.
 
 ## Tips
@@ -67,7 +67,7 @@ GitBell installs to `%LOCALAPPDATA%\Programs\GitBell`, adds a Start menu shortcu
 ## Update and uninstall
 
 ```bash
-npx gitbell@latest                  # update (GitBell also tells you when a new version is out)
+npx gitbell@latest                  # update (a new version shows a banner in the panel, plus a notification if notifications are on)
 npx gitbell uninstall               # remove the app, keep settings
 npx gitbell uninstall --purge       # also remove settings, history and the saved token
 ```

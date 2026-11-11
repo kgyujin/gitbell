@@ -53,6 +53,9 @@ public struct ActivityEvent: Codable, Identifiable, Hashable, Sendable {
     /// 이 활동이 일어난 PR을 올린 사람. '내 PR' 필터와 알림에 쓴다. 알 수 없으면 nil.
     /// 0.3.x 기록에는 없는 필드라 선택값으로 둔다(디코딩 시 없으면 nil).
     public var prAuthor: String?
+    /// push 커밋 제목을 읽다 잠시 뒤 될 실패(네트워크·5xx)로 미룬 횟수. 몇 번 넘으면 그만 읽는다
+    /// (영영 실패하는 push를 확인마다 다시 읽어 API 한도를 쓰지 않게). 예전 기록에는 없어 선택값이다.
+    public var detailAttempts: Int?
 
     public var repoName: String { repo.split(separator: "/").last.map(String.init) ?? repo }
 
@@ -89,7 +92,12 @@ public struct GHUser: Decodable, Sendable {
 }
 
 public struct GHPull: Decodable, Sendable {
-    public struct Head: Decodable, Sendable { public var ref: String }
+    public struct Head: Decodable, Sendable {
+        public struct Repo: Decodable, Sendable { public var fullName: String }
+        public var ref: String
+        /// 브랜치가 있는 저장소. 포크에서 올린 PR이면 원래 저장소가 아니다(포크가 지워지면 없다).
+        public var repo: Repo?
+    }
     public var number: Int
     /// PR의 브랜치. 그 브랜치에 들어온 push가 누구 PR인지 찾는 데 쓴다.
     public var head: Head?

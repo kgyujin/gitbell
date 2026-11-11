@@ -181,9 +181,9 @@ const reviewRecent = '2026-11-09T05:30:00Z';
 function reviewEvents() {
   return EventBuilder.build({
     pulls: [
-      { number: 5, title: '내 PR', html_url: 'https://github.com/o/r/pull/5', user: { login: 'me' }, head: { ref: 'feat/mine' },
+      { number: 5, title: '내 PR', html_url: 'https://github.com/o/r/pull/5', user: { login: 'me' }, head: { ref: 'feat/mine', repo: { full_name: 'o/r' } },
         created_at: '2026-11-08T00:00:00Z', updated_at: reviewRecent, merged_at: null, closed_at: null, merge_commit_sha: null },
-      { number: 6, title: '남의 PR', html_url: 'https://github.com/o/r/pull/6', user: { login: 'amy' }, head: { ref: 'feat/amy' },
+      { number: 6, title: '남의 PR', html_url: 'https://github.com/o/r/pull/6', user: { login: 'amy' }, head: { ref: 'feat/amy', repo: { full_name: 'o/r' } },
         created_at: reviewRecent, updated_at: reviewRecent, merged_at: null, closed_at: null, merge_commit_sha: null },
     ],
     reviewsByPR: { 5: [{ id: 1, state: 'APPROVED', body: '', user: { login: 'bob' }, submitted_at: reviewRecent, html_url: 'https://r/1' }] },

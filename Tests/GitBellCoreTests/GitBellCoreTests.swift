@@ -170,10 +170,13 @@ final class WatchStateTests: XCTestCase {
         XCTAssertTrue(again.isEmpty, "같은 항목은 다시 알리지 않는다")
     }
 
-    func testIncludeOwnActivity() {
+    func testIncludeOwnActivityIsListedAsReadWithoutNotification() {
         var state = laterState()
         let notified = state.apply(events, now: now, includeOwn: true).map(\.id)
-        XCTAssertTrue(notified.contains("\(repo)#pr-merged:32"))
+        let merged = state.history.first { $0.id == "\(repo)#pr-merged:32" }
+        XCTAssertNotNil(merged, "내 활동도 목록에는 보인다")
+        XCTAssertEqual(merged?.isUnread, false, "내가 한 일은 안 읽음이 아니다")
+        XCTAssertFalse(notified.contains("\(repo)#pr-merged:32"), "내가 한 일을 나에게 알리지 않는다")
     }
 
     func testSeenExpiresAndHistoryIsCapped() {

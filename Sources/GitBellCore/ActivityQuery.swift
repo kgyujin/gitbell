@@ -37,6 +37,11 @@ public struct ActivityQuery: Equatable, Sendable {
         self.sort = sort
     }
 
+    /// 다음에 열 때도 쓰도록 저장하는 부분. 검색어와 내 이름·종류 이름(저장하지 않는 값)은 뺀다.
+    public var savedPart: ActivityQuery {
+        ActivityQuery(category: category, repo: repo, unreadOnly: unreadOnly, mineOnly: mineOnly, sort: sort)
+    }
+
     /// 기본값과 다른 필터가 걸려 있는지(정렬은 필터가 아니라 세지 않는다).
     public var isFiltering: Bool {
         category != nil || repo != nil || unreadOnly || mineOnly || !trimmedSearch.isEmpty

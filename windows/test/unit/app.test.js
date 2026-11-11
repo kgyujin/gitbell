@@ -14,12 +14,13 @@ const { createTokenStore, ghCandidates } = require('../../src/token-store');
 const { createFileStore } = require('../../src/file-store');
 const { panelPosition } = require('../../src/window-position');
 const { demoState } = require('../../src/demo-data');
-const { GitHubError, createGitHubAPI } = require('../../src/core/github-api');
+const { GitHubError, createGitHubAPI, createResponseCache } = require('../../src/core/github-api');
 const { user } = require('./fixtures');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 
-function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, savedState = null, savedSettings = null, undoMs } = {}) {
+function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, savedState = null, savedSettings = null, undoMs,
+  latestVersion = '0.5.0' } = {}) {
   const saved = { state: savedState, settings: savedSettings };
   const opened = [];
   const copied = [];
@@ -50,6 +51,7 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
     notifier: {
       post: (events, sound) => notified.push({ events, sound }),
       postTest: () => notified.push('test'),
+      postUpdate: (version, sound) => notified.push({ update: version, sound }),
       dismiss: (ids, includeSummaries) => dismissed.push({ ids, includeSummaries }),
     },
     system: {
@@ -61,7 +63,7 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
     l10n: createL10n({ korean: false }),
     version: '0.4.0',
     now: () => '2026-11-09T06:00:00Z',
-    fetchLatestVersion: async () => '0.5.0',
+    fetchLatestVersion: async () => (typeof latestVersion === 'function' ? latestVersion() : latestVersion),
     undoMs,
   });
   return { model, saved, opened, copied, notified, dismissed };
@@ -196,6 +198,47 @@ test('AppModel: 설정은 저장되고 다시 읽힌다', () => {
   assert.equal(settings.notificationPrefs.playsSound, false);
   assert.equal(settings.showsCountInTray, false);
   assert.deepEqual(normalizeSettings('garbage'), normalizeSettings({}), '망가진 파일은 기본값');
+});
+
+test('AppModel: 새 버전은 시스템 알림으로 한 번만 알린다', async () => {
+  let latest = '0.5.0';
+  const { model, notified, saved } = harness({ latestVersion: () => latest });
+  await model.checkForUpdate();
+  assert.deepEqual(notified, [{ update: '0.5.0', sound: true }]);
+  assert.equal(saved.settings.notifiedUpdate, '0.5.0', '알린 버전을 저장한다');
+
+  await model.checkForUpdate();
+  assert.equal(notified.length, 1, '같은 버전은 다시 알리지 않는다');
+
+  // 앱을 다시 켜도(저장한 설정을 읽어도) 같은 버전은 다시 알리지 않는다.
+  const again = harness({ latestVersion: '0.5.0', savedSettings: saved.settings });
+  await again.model.checkForUpdate();
+  assert.equal(again.notified.length, 0);
+
+  latest = '0.6.0';
+  await model.checkForUpdate();
+  assert.deepEqual(notified.at(-1), { update: '0.6.0', sound: true }, '더 새 버전은 또 알린다');
+
+  // 지금 버전과 같으면 알리지 않는다.
+  const current = harness({ latestVersion: '0.4.0' });
+  await current.model.checkForUpdate();
+  assert.equal(current.notified.length, 0);
+  assert.equal(current.model.viewModel().availableUpdate, null);
+});
+
+test('AppModel: 알림을 꺼 두면 새 버전은 띠로만 알린다', async () => {
+  const { model, notified, saved } = harness({
+    savedSettings: { notificationPrefs: { isEnabled: false } },
+  });
+  await model.checkForUpdate();
+  assert.equal(notified.length, 0);
+  assert.equal(model.viewModel().availableUpdate, '0.5.0');
+  assert.equal(saved.settings.notifiedUpdate ?? null, null, '알리지 않았으니 알린 것으로 기록하지 않는다');
+  // 알림을 다시 켜면 다음 확인 때 그 버전을 알린다.
+  model.setNotificationPrefs({ isEnabled: true });
+  await model.checkForUpdate();
+  assert.deepEqual(notified, [{ update: '0.5.0', sound: true }]);
+  assert.equal(normalizeSettings({ notifiedUpdate: 3 }).notifiedUpdate, null, '망가진 값은 버린다');
 });
 
 test('AppModel: 새 버전 알림과 토큰 바꾸기', async () => {
@@ -507,7 +550,7 @@ test('AppModel: 묶음 하나를 읽음으로 바꾸고 되돌린다', async () 
   const today = model.viewModel().sections[0];
   model.markSectionRead(today.id);
   assert.equal(model.unreadCount, 0);
-  assert.deepEqual(model.viewModel().readUndo, { text: 'Marked 2 items as read' });
+  assert.equal(model.viewModel().readUndo.text, 'Marked 2 items as read');
 
   model.undoMarkRead();
   assert.equal(model.unreadCount, 2, '되돌리면 다시 안 읽음');
@@ -527,4 +570,112 @@ test('AppModel: 되돌리기는 잠시 뒤 사라진다', async () => {
   assert.notEqual(model.viewModel().readUndo, null);
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.equal(model.viewModel().readUndo, null);
+});
+
+test('GitHub API: 바뀐 것이 없으면(304) 보관한 응답을 다시 쓴다', async () => {
+  const sent = [];
+  const replies = [
+    { status: 200, etag: '"v1"', body: '{"login":"me"}' },
+    { status: 304, etag: '"v1"', body: '' },
+  ];
+  const fetch = async (_url, { headers }) => {
+    sent.push(headers['If-None-Match'] || null);
+    const reply = replies.shift();
+    return { status: reply.status, text: async () => reply.body, headers: new Map([['etag', reply.etag]]) };
+  };
+  const cache = createResponseCache();
+  const api = createGitHubAPI({ token: 'tok', fetch, cache });
+  assert.deepEqual(await api.get('user'), { login: 'me' });
+  assert.deepEqual(await api.get('user'), { login: 'me' }, '304면 보관한 본문을 쓴다');
+  assert.deepEqual(sent, [null, '"v1"'], '두 번째에는 받은 ETag를 보낸다');
+
+  // push마다 한 번 읽는 큰 응답(커밋 한 개)은 보관하지 않는다.
+  replies.push({ status: 200, etag: '"c"', body: '{}' }, { status: 200, etag: '"c"', body: '{}' });
+  await api.get('repos/o/r/commits/abc');
+  await api.get('repos/o/r/commits/abc');
+  assert.deepEqual(sent.slice(2), [null, null]);
+
+  // 다른 계정(토큰)이면 앞 계정의 응답을 쓰지 않는다.
+  assert.equal(cache.size, 1);
+  replies.push({ status: 200, etag: '"o"', body: '{"login":"other"}' });
+  await createGitHubAPI({ token: 'other', fetch, cache }).get('user');
+  assert.equal(sent.at(-1), null, '다른 계정으로는 앞 계정의 ETag를 보내지 않는다');
+  // 토큰이 바뀌기 전에 시작한 확인의 응답은 넣지 않는다.
+  cache.set('late', { etag: 'e', text: '{}' }, 'tok');
+  assert.equal(cache.get('late', 'other'), null);
+});
+
+test('GitHub API 응답 보관소: 가득 차면 가장 오래 안 쓴 것부터 버린다', () => {
+  const cache = createResponseCache({ limit: 2 });
+  cache.use('a');
+  cache.set('1', { etag: 'e', text: '1' });
+  cache.set('2', { etag: 'e', text: '2' });
+  cache.get('1');
+  cache.set('3', { etag: 'e', text: '3' });
+  assert.deepEqual([cache.get('1') != null, cache.get('2') != null, cache.get('3') != null], [true, false, true]);
+
+  const small = createResponseCache({ byteLimit: 10 });
+  small.use('a');
+  small.set('1', { etag: 'e', text: '123456' });
+  small.set('2', { etag: 'e', text: '123456' });
+  assert.deepEqual([small.get('1') != null, small.get('2') != null], [false, true], '본문 크기 합이 넘치면 오래된 것부터 버린다');
+});
+
+test('AppModel: 찾은 토큰을 기억해 확인할 때마다 다시 찾지 않는다', async () => {
+  const { model } = harness({ routes: pushRoutes([]) });
+  let lookups = 0;
+  const resolve = model.deps.tokens.resolve;
+  model.deps.tokens.resolve = async () => { lookups += 1; return resolve(); };
+  await model.refresh();
+  await model.refresh();
+  assert.equal(lookups, 1, '키체인·gh를 매번 읽지 않는다');
+  // 토큰을 바꾸면 다시 찾는다.
+  await model.saveToken('new-token');
+  assert.equal(lookups, 2);
+});
+
+test('AppModel: 기억한 토큰이 401이면 새로 찾아 한 번 더 확인한다', async () => {
+  const routes = pushRoutes([]);
+  const { model } = harness({ routes });
+  await model.refresh();
+  // gh auth login으로 토큰이 바뀐 상황: 예전 토큰은 401, 새로 찾으면 정상.
+  let attempts = 0;
+  const createAPI = model.deps.createAPI;
+  model.deps.createAPI = (token) => {
+    attempts += 1;
+    return attempts === 1 ? { get: async () => { throw new GitHubError('unauthorized', '', 401); } } : createAPI(token);
+  };
+  await model.refresh();
+  assert.equal(attempts, 2, '새 토큰으로 바로 다시 확인한다');
+  assert.equal(model.problem, null, '잠깐의 401로 오류를 보이지 않는다');
+});
+
+test('AppModel: 한도가 풀리기 전에는 GitHub에 보내지 않는다', async () => {
+  const { model } = harness({ routes: pushRoutes([]) });
+  model.problem = { type: 'rateLimited', resetAt: '2026-11-09T07:00:00Z' };
+  let calls = 0;
+  model.deps.createAPI = () => ({ get: async () => { calls += 1; return []; } });
+  await model.refresh();
+  assert.equal(calls, 0);
+});
+
+test('AppModel: 토큰을 바꾸면 앞 계정의 한도 초과가 새 계정의 확인을 막지 않는다', async () => {
+  const { model } = harness({ routes: pushRoutes([]) });
+  model.problem = { type: 'rateLimited', resetAt: '2026-11-09T07:00:00Z' };
+  let calls = 0;
+  const createAPI = model.deps.createAPI;
+  model.deps.createAPI = (token) => { calls += 1; return createAPI(token); };
+  await model.saveToken('other-account');
+  assert.equal(calls, 1, '새 계정으로 바로 확인한다');
+  assert.equal(model.problem, null);
+});
+
+test('AppModel: 검색어를 칠 때는 설정 파일을 다시 쓰지 않는다', () => {
+  const { model, saved } = harness();
+  model.setQuery({ unreadOnly: true });
+  const before = JSON.stringify(saved.settings);
+  saved.settings = null;
+  model.setQuery({ search: 'abc' });
+  assert.equal(saved.settings, null, '검색어만 바뀌면 저장하지 않는다');
+  assert.ok(before.includes('"unreadOnly":true'));
 });

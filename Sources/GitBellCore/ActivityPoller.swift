@@ -29,8 +29,14 @@ public struct ActivityPoller: Sendable {
         if state.me.isEmpty {
             state.me = try await api.get("user", as: GHUser.self).login
         }
-        let since = state.lastChecked.map { $0.addingTimeInterval(-config.overlap) }
-            ?? now.addingTimeInterval(-config.firstRunLookback)
+        let since = Self.since(lastChecked: state.lastChecked, now: now, config: config)
+        let retry = state.retrySince ?? [:]
+        // 지난번에 읽지 못한 저장소는 그때부터 다시 읽는다(하루보다 오래된 것은 읽지 않는다).
+        let oldest = Self.rounded(now.addingTimeInterval(-config.firstRunLookback), config: config)
+        let sinceFor: @Sendable (String) -> Date = { repo in
+            guard let pending = retry[repo] else { return since }
+            return max(oldest, min(since, pending))
+        }
 
         async let repos = api.get(
             "user/repos?sort=pushed&direction=desc&per_page=\(config.discoveryPageSize)"
@@ -47,35 +53,75 @@ public struct ActivityPoller: Sendable {
         } catch let GitHubError.rateLimited(resetAt) {
             // 한도 초과는 토큰 종류 문제가 아니라 잠시 기다릴 일이라 그대로 알린다.
             throw GitHubError.rateLimited(resetAt: resetAt)
+        } catch let error as GitHubError where Self.isTemporary(error) {
+            // 잠깐의 네트워크·서버 오류는 '알림함을 못 읽는 토큰'이 아니다. 이번 확인을 통째로 실패로 두어
+            // lastChecked를 그대로 둔다(알림함으로만 잡히는 조용한 저장소의 그 사이 댓글을 잃지 않게).
+            throw error
         } catch {
             notifications = nil
         }
-        let selected = RepoSelector.select(repos: try await repos, notifications: notifications ?? [],
-                                           since: since, now: now, config: config)
+        let picked = RepoSelector.select(repos: try await repos, notifications: notifications ?? [],
+                                         since: since, now: now, config: config)
+        let selected = Array(Set(picked).union(retry.keys)).sorted()
 
-        let (events, failed, rateLimit) = await collect(selected, since: since)
+        let (events, failed, retryable, rateLimit) = await collect(selected, sinceFor: sinceFor)
         // 저장소를 읽다가 한도에 걸렸으면 이번 결과를 버린다. 마지막 확인 시각을 그대로 두어야
         // 한도가 풀린 뒤 이 구간을 다시 읽는다(앞으로 밀면 그 사이 활동이 빠진다).
         if let resetAt = rateLimit { throw GitHubError.rateLimited(resetAt: resetAt) }
         state.checkedRepos = selected
+        // 잠시 뒤 될 실패(네트워크·서버 오류)만 기억한다. 지워졌거나 권한이 없어진 저장소(404 등)는
+        // 다시 읽어도 실패하므로 기억하지 않는다(기억하면 매번 읽고 '읽지 못함'을 계속 보인다).
+        // 처음 실행에서 실패한 저장소는 기억하지 않는다. 기억하면 다음 확인에서 그 저장소의 하루치를
+        // '처음 실행이 아닌' 새 항목으로 읽어, 설치하자마자 오래된 알림이 한꺼번에 왔다.
+        let isFirstRun = state.lastChecked == nil
+        let nextRetry = isFirstRun ? [:] : Dictionary(uniqueKeysWithValues: retryable.map { ($0, sinceFor($0)) })
+        state.retrySince = nextRetry.isEmpty ? nil : nextRetry
         var newEvents = state.apply(events, now: now, includeOwn: includeOwn, config: config)
 
         // push의 커밋 제목은 기록에 새로 들어온 push에만 한 번 읽어 API 호출을 줄인다.
-        for event in state.history where event.kind.isPush && !event.detailResolved {
-            let resolved = await resolvePush(event)
-            state.update(resolved)
-            if let index = newEvents.firstIndex(where: { $0.id == resolved.id }) {
-                newEvents[index] = resolved
+        // 몇 개씩 동시에 읽고, 한도에 걸리면 남은 것은 다음 확인으로 미룬다(더 보내도 실패하고 2차 한도 위험만 커진다).
+        let pending = state.history.filter { $0.kind.isPush && !$0.detailResolved }
+        for start in stride(from: 0, to: pending.count, by: config.maxConcurrentRepos) {
+            let chunk = pending[start..<min(start + config.maxConcurrentRepos, pending.count)]
+            let results = await withTaskGroup(of: PushDetail.self) { group in
+                for event in chunk { group.addTask { await resolvePushDetail(event) } }
+                return await group.reduce(into: [PushDetail]()) { $0.append($1) }
             }
+            for result in results {
+                state.update(result.event)
+                if let index = newEvents.firstIndex(where: { $0.id == result.event.id }) {
+                    newEvents[index] = result.event
+                }
+            }
+            if results.contains(where: \.hitRateLimit) { break }
         }
         return RefreshResult(state: state, newEvents: newEvents, failedRepos: failed,
                              notificationsUnavailable: notifications == nil)
     }
 
+    /// 이번 확인에서 읽기 시작할 시각. 지난 확인 시각보다 overlap만큼 앞이고, 하루(firstRunLookback)보다
+    /// 오래되지 않게 묶는다. 며칠 꺼 두었다 켜도 며칠치 댓글·리뷰를 한꺼번에 읽고 알리지 않게 하려는 것이다.
+    static func since(lastChecked: Date?, now: Date, config: WatchConfig) -> Date {
+        let oldest = now.addingTimeInterval(-config.firstRunLookback)
+        let wanted = lastChecked.map { $0.addingTimeInterval(-config.overlap) } ?? oldest
+        return rounded(max(wanted, oldest), config: config)
+    }
+
+    /// sinceGranularity 단위로 내려 맞춘다(같은 since 주소를 다시 써서 304를 받으려고).
+    static func rounded(_ date: Date, config: WatchConfig) -> Date {
+        let step = config.sinceGranularity
+        guard step > 0 else { return date }
+        return Date(timeIntervalSince1970: (date.timeIntervalSince1970 / step).rounded(.down) * step)
+    }
+
     /// 저장소들을 읽는다. 실패한 저장소 이름과, 한도에 걸렸다면 그 다시 쓸 수 있는 시각도 돌려준다.
-    func collect(_ repos: [String], since: Date) async -> ([ActivityEvent], [String], Date??) {
+    /// sinceFor: 저장소마다 읽기 시작할 시각(지난번에 실패한 저장소는 더 앞부터 읽는다).
+    /// 돌려주는 값: 항목, 실패한 저장소, 그중 잠시 뒤 다시 읽을 만한 저장소, 한도에 걸렸으면 다시 쓸 수 있는 시각.
+    func collect(_ repos: [String], sinceFor: @escaping @Sendable (String) -> Date) async
+        -> ([ActivityEvent], [String], [String], Date??) {
         var events: [ActivityEvent] = []
         var failed: [String] = []
+        var retryable: [String] = []
         var rateLimit: Date?? = nil
         // 한꺼번에 너무 많이 보내지 않도록 maxConcurrentRepos개씩 나눠 읽는다.
         for start in stride(from: 0, to: repos.count, by: config.maxConcurrentRepos) {
@@ -83,6 +129,7 @@ public struct ActivityPoller: Sendable {
             await withTaskGroup(of: (String, Result<[ActivityEvent], Error>).self) { group in
                 for repo in chunk {
                     group.addTask {
+                        let since = sinceFor(repo)
                         do {
                             let snapshot = try await snapshot(repo: repo, since: since)
                             return (repo, .success(EventBuilder.build(snapshot, repo: repo, since: since)))
@@ -95,6 +142,9 @@ public struct ActivityPoller: Sendable {
                     switch result {
                     case let .success(built): events.append(contentsOf: built)
                     case let .failure(GitHubError.rateLimited(resetAt)): rateLimit = .some(resetAt); failed.append(repo)
+                    case let .failure(error as GitHubError) where Self.isTemporary(error):
+                        failed.append(repo)
+                        retryable.append(repo)
                     case .failure: failed.append(repo)
                     }
                 }
@@ -102,7 +152,7 @@ public struct ActivityPoller: Sendable {
             // 한도에 걸렸으면 남은 저장소는 읽지 않는다(더 보내도 실패한다).
             if rateLimit != nil { break }
         }
-        return (events.sorted { $0.time < $1.time }, failed.sorted(), rateLimit)
+        return (events.sorted { $0.time < $1.time }, failed.sorted(), retryable.sorted(), rateLimit)
     }
 
     func snapshot(repo: String, since: Date) async throws -> RepoSnapshot {
@@ -119,38 +169,76 @@ public struct ActivityPoller: Sendable {
 
         var snapshot = RepoSnapshot(pulls: try await pulls, reviewComments: try await reviewComments,
                                     issueComments: try await issueComments, activity: try await activity)
-        for pull in snapshot.pulls where (pull.updatedAt ?? .distantPast) >= since {
-            snapshot.reviewsByPR[pull.number] = try await api.get(
-                "repos/\(repo)/pulls/\(pull.number)/reviews?per_page=100", as: [GHReview].self)
+        // 바뀐 PR의 리뷰를 몇 개씩 동시에 읽는다(한 PR씩 차례로 읽으면 처음 실행 때 저장소마다 수십 번을 기다린다).
+        let updated = snapshot.pulls.filter { ($0.updatedAt ?? .distantPast) >= since }.map(\.number)
+        for start in stride(from: 0, to: updated.count, by: config.maxConcurrentRepos) {
+            let chunk = updated[start..<min(start + config.maxConcurrentRepos, updated.count)]
+            try await withThrowingTaskGroup(of: (Int, [GHReview]).self) { group in
+                for number in chunk {
+                    group.addTask {
+                        (number, try await api.get("repos/\(repo)/pulls/\(number)/reviews?per_page=100",
+                                                   as: [GHReview].self))
+                    }
+                }
+                for try await (number, reviews) in group { snapshot.reviewsByPR[number] = reviews }
+            }
         }
         return snapshot
     }
 
+    /// push 하나의 커밋 정보를 읽은 결과. hitRateLimit이면 남은 push는 이번에 읽지 않는다.
+    struct PushDetail: Sendable {
+        var event: ActivityEvent
+        var hitRateLimit = false
+    }
+
     /// push에 커밋 수와 마지막 커밋 제목을 채운다. 실패해도 항목은 그대로 보인다.
     func resolvePush(_ event: ActivityEvent) async -> ActivityEvent {
+        await resolvePushDetail(event).event
+    }
+
+    func resolvePushDetail(_ event: ActivityEvent) async -> PushDetail {
         var resolved = event
         resolved.detailResolved = true
-        guard let after = event.after, !after.isEmpty else { return resolved }
-        if let before = event.before, !before.isEmpty, before != EventBuilder.zeroSHA,
-           let compare = try? await api.get("repos/\(event.repo)/compare/\(before)...\(after)", as: GHCompare.self),
-           let last = compare.commits.last {
-            resolved.commitCount = compare.totalCommits ?? compare.commits.count
-            resolved.title = TextPreview.firstLine(last.commit.message)
-            return resolved
+        guard let after = event.after, !after.isEmpty else { return PushDetail(event: resolved) }
+        // 한도·네트워크처럼 잠시 뒤 될 수 있는 실패는 '다 읽음'으로 두지 않아 다음 확인 때 다시 읽는다.
+        func postponed(_ error: GitHubError) -> PushDetail {
+            var isRateLimit = false
+            if case .rateLimited = error { isRateLimit = true }
+            // 몇 번 미뤄도 안 되면 그만 읽는다(제목 없이 보인다). 한도 초과는 횟수에 세지 않는다(풀리면 다시 읽는다).
+            let attempts = (event.detailAttempts ?? 0) + (isRateLimit ? 0 : 1)
+            resolved.detailAttempts = attempts
+            resolved.detailResolved = attempts >= Self.maxDetailAttempts
+            return PushDetail(event: resolved, hitRateLimit: isRateLimit)
         }
-        // 강제 push 뒤에는 before 커밋이 사라져 compare가 실패할 수 있어 마지막 커밋만 읽는다.
+        if let before = event.before, !before.isEmpty, before != EventBuilder.zeroSHA {
+            do {
+                let compare = try await api.get("repos/\(event.repo)/compare/\(before)...\(after)", as: GHCompare.self)
+                if let last = compare.commits.last {
+                    resolved.commitCount = compare.totalCommits ?? compare.commits.count
+                    resolved.title = TextPreview.firstLine(last.commit.message)
+                    return PushDetail(event: resolved)
+                }
+            } catch let error as GitHubError where Self.isTemporary(error) {
+                // 잠시 뒤 될 실패면 마지막 커밋도 지금은 읽지 않는다(같은 이유로 실패하고 한도만 쓴다).
+                return postponed(error)
+            } catch {
+                // 강제 push 뒤에는 before 커밋이 사라져 compare가 실패할 수 있다. 아래에서 마지막 커밋만 읽는다.
+            }
+        }
         do {
             let commit = try await api.get("repos/\(event.repo)/commits/\(after)", as: GHCommit.self)
             resolved.title = TextPreview.firstLine(commit.commit.message)
         } catch let error as GitHubError where Self.isTemporary(error) {
-            // 한도·네트워크처럼 잠시 뒤 될 수 있는 실패는 '다 읽음'으로 두지 않아 다음 확인 때 다시 읽는다.
-            // (예전에는 어떤 실패든 다 읽음으로 표시해, 커밋 제목이 영영 비었다.)
-            resolved.detailResolved = false
+            return postponed(error)
         } catch {
             // 커밋이 사라진 경우(404 등)는 다시 읽어도 안 되므로 그대로 둔다.
         }
-        return resolved
+        return PushDetail(event: resolved)
     }
+
+    /// push 커밋 제목을 잠시 뒤 될 실패로 미루는 최대 횟수.
+    static let maxDetailAttempts = 3
 
     static func isTemporary(_ error: GitHubError) -> Bool {
         switch error {

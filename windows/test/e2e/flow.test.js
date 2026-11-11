@@ -33,7 +33,7 @@ function routes({ withNewPush = false } = {}) {
     ['notifications', []],
     ['repos/acme/web/pulls/comments', []],
     ['repos/acme/web/pulls?', [{ number: 7, title: 'Add search', html_url: 'https://github.com/acme/web/pull/7', user: user('amy'),
-      head: { ref: 'feat/search' }, created_at: pushTime, updated_at: pushTime, merged_at: null, closed_at: null, merge_commit_sha: null }]],
+      head: { ref: 'feat/search', repo: { full_name: 'acme/web' } }, created_at: pushTime, updated_at: pushTime, merged_at: null, closed_at: null, merge_commit_sha: null }]],
     ['repos/acme/web/pulls/7/reviews', []],
     ['repos/acme/web/issues/comments', []],
     ['repos/acme/web/activity', activity],
@@ -95,7 +95,7 @@ test('연결부터 새 활동까지', async (t) => {
   await window.keyboard.press('Control+,');
   assert.ok(await window.getByText('Connected with a personal access token · @me').isVisible());
   assert.equal(await window.locator('.segment.selected').textContent(), '2 min', '기본 확인 간격');
-  await window.getByRole('button', { name: '5 min', exact: true }).click();
+  await window.getByRole('radio', { name: '5 min', exact: true }).click();
   await window.waitForFunction(() => document.querySelector('.segment.selected').textContent === '5 min');
   assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8')).refreshMinutes, 5);
 

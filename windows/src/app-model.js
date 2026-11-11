@@ -16,6 +16,10 @@ const REFRESH_CHOICES = [1, 2, 5, 10, 15];
 /** 여러 항목을 읽음으로 바꾼 뒤 '되돌리기'를 보이는 시간. */
 const UNDO_MS = 8000;
 const UPDATE_COMMAND = 'npx gitbell@latest';
+/** 새 버전 확인 간격(분). 확인 주기(1·2·5·10·15분)로 나누어떨어져야 정확히 1시간마다 확인한다. */
+const UPDATE_CHECK_MINUTES = 60;
+/** 찾은 토큰을 다시 찾지 않고 쓰는 시간(currentToken). */
+const TOKEN_REUSE_MS = 30 * 60 * 1000;
 const URLS = Object.freeze({
   notifications: 'https://github.com/notifications',
   tokenCreation: 'https://github.com/settings/tokens/new?scopes=repo,notifications,read:org&description=GitBell',
@@ -30,6 +34,8 @@ function defaultSettings() {
     notificationPrefs: Prefs.notificationPreferences(),
     display: Prefs.displayPreferences(),
     query: { category: null, repo: null, unreadOnly: false, mineOnly: false, sort: Query.SortMode.newest },
+    /** 시스템 알림으로 이미 알린 새 버전. 같은 버전은 한 번만 알린다. */
+    notifiedUpdate: null,
   };
 }
 
@@ -52,6 +58,7 @@ function normalizeSettings(saved) {
       mineOnly: query.mineOnly === true,
       sort: oneOf(query.sort, Object.values(Query.SortMode), Query.SortMode.newest),
     },
+    notifiedUpdate: typeof value.notifiedUpdate === 'string' ? value.notifiedUpdate : null,
   };
 }
 
@@ -62,6 +69,7 @@ class AppModel {
    * @param {{resolve(): Promise<{value: string, source: 'saved'|'githubCLI'}|null>, save(t: string): boolean, remove(): void}} deps.tokens
    * @param {(token: string) => {get(path: string): Promise<any>}} deps.createAPI
    * @param {{post(events: object[], playsSound: boolean): void, postTest(playsSound: boolean): void,
+   *   postUpdate(version: string, playsSound: boolean): void,
    *   dismiss?(ids: string[], includeSummaries: boolean): void}} deps.notifier
    * @param {{openURL(url: string): void, copyText(text: string): void, getLaunchAtLogin(): boolean,
    *          setLaunchAtLogin(on: boolean): void, openNotificationSettings(): void, quit(): void}} deps.system
@@ -87,13 +95,18 @@ class AppModel {
     /** 방금 여러 항목을 읽음으로 바꾼 기록(되돌리기용). */
     this.readUndo = null;
     this.timer = null;
-    this.checks = 0;
     this.demo = false;
     /** 확인 반복의 세대. 간격을 바꾸면 올라가고, 예전 반복은 다음 확인을 잡지 않고 끝난다. */
     this.loopGeneration = 0;
     /** 계정(토큰)의 세대. 새로고침 도중 토큰이 바뀌면 그 결과를 버린다. */
     this.accountGeneration = 0;
     this.refreshAgain = false;
+    /** 기억해 둔 토큰 {token, foundAt}(currentToken). */
+    this.cachedToken = null;
+    /** 지난 확인에 쓴 토큰. 바뀌면 같은 계정인지 확인한다(refreshOnce). */
+    this.lastTokenValue = null;
+    /** 마지막으로 새 버전을 확인한 시각(ms). */
+    this.lastUpdateCheck = 0;
   }
 
   onChange(listener) {
@@ -133,9 +146,9 @@ class AppModel {
     const tick = async () => {
       this.timer = null;
       await this.refresh();
-      this.checks += 1;
-      // 새 버전 확인은 하루에 몇 번이면 충분하다(12시간마다, 첫 확인 때 한 번).
-      if (this.checks === 1 || this.checks % Math.max(1, Math.floor(720 / this.settings.refreshMinutes)) === 0) {
+      // 새 버전은 첫 확인 때와 그 뒤 1시간마다 확인한다(npm에 작은 요청 하나라 부담이 없다).
+      // 마지막 확인 시각으로 재서, 간격을 바꾸거나 잠자기에서 깨어 반복을 새로 시작해도 1시간 주기가 흐트러지지 않는다.
+      if (Date.parse(this.deps.now()) - this.lastUpdateCheck >= UPDATE_CHECK_MINUTES * 60 * 1000) {
         await this.checkForUpdate();
       }
       // 확인하는 동안 간격이 바뀌어 새 반복이 시작됐으면 이 반복은 여기서 끝난다.
@@ -164,34 +177,87 @@ class AppModel {
     }
   }
 
+  /**
+   * 확인할 때마다 토큰 파일을 풀고 gh를 실행하지 않도록 찾은 토큰을 잠시 기억한다.
+   * 토큰을 저장·삭제하거나 401을 받으면 지우고, 30분이 지나도 다시 찾는다(gh로 다른 계정에 로그인했을 수 있다).
+   */
+  async currentToken() {
+    const now = Date.parse(this.deps.now());
+    if (this.cachedToken && now - this.cachedToken.foundAt < TOKEN_REUSE_MS) return this.cachedToken.token;
+    const token = await this.deps.tokens.resolve();
+    this.cachedToken = token ? { token, foundAt: now } : null;
+    return token;
+  }
+
   async refreshOnce() {
     const account = this.accountGeneration;
+    // API 한도에 걸렸으면 풀리는 시각까지는 보내지 않는다(보내도 실패하고 2차 한도 위험만 커진다).
+    if (this.problem && this.problem.type === 'rateLimited' && this.problem.resetAt
+      && Date.parse(this.problem.resetAt) > Date.parse(this.deps.now())) return;
+    const usedCachedToken = this.cachedToken != null;
     try {
-      const token = await this.deps.tokens.resolve();
+      const token = await this.currentToken();
       if (!token) {
         this.tokenSource = null;
         this.problem = { type: 'noToken' };
         return;
       }
       this.tokenSource = token.source;
-      const result = await Poller.refresh(this.deps.createAPI(token.value), this.state,
+      const api = this.deps.createAPI(token.value);
+      // gh auth login으로 다른 계정에 로그인했으면(토큰이 바뀌었는데 401은 아님) 앞 계정의 기록을 이어 쓰면
+      // 새 계정의 하루치가 모두 새 알림이 되고 내 활동도 거르지 못한다. 그래서 첫 실행처럼 다시 채운다.
+      if (this.lastTokenValue && this.lastTokenValue !== token.value && this.state.me) {
+        const login = await api.get('user').then((user) => user.login, () => null);
+        if (login && login !== this.state.me) this.state = WatchState.createState();
+      }
+      this.lastTokenValue = token.value;
+      const unreadBefore = new Set(this.state.history.filter((e) => e.isUnread).map((e) => e.id));
+      const result = await Poller.refresh(api, this.state,
         { now: this.deps.now(), includeOwn: this.settings.includeOwnActivity });
       // 확인하는 동안 토큰이 바뀌었으면 예전 계정의 결과라 버린다(곧 다시 확인한다).
       if (account !== this.accountGeneration) return;
       // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.
       this.state = WatchState.adoptingReadMarks(result.state, this.state);
       this.saveState();
+      // 기록이 넘쳐 목록에서 빠진 안 읽은 항목의 알림은 알림 센터에서도 지운다(누를 곳이 없는 알림이 남지 않게).
+      const kept = new Set(this.state.history.map((e) => e.id));
+      const dropped = [...unreadBefore].filter((id) => !kept.has(id));
+      if (dropped.length && this.deps.notifier.dismiss) this.deps.notifier.dismiss(dropped, false);
       if (result.failedRepos.length) this.problem = { type: 'partial', repos: result.failedRepos };
       else this.problem = result.notificationsUnavailable ? { type: 'limited' } : null;
       const toNotify = Prefs.eventsToNotify(result.newEvents, this.settings.notificationPrefs, this.settings.display, this.state.me);
       if (toNotify.length) this.deps.notifier.post(toNotify, this.settings.notificationPrefs.playsSound);
     } catch (error) {
       if (account !== this.accountGeneration) return;
-      if (error && error.kind === 'unauthorized') this.problem = { type: 'unauthorized' };
-      else if (error && error.kind === 'rateLimited') this.problem = { type: 'rateLimited', resetAt: error.resetAt || null };
+      if (error && error.kind === 'unauthorized') {
+        this.cachedToken = null;
+        // 기억해 둔 토큰이 그사이 바뀌었을 수 있다(gh auth login을 다시 함). 새로 찾아 한 번 더 확인한다.
+        if (usedCachedToken) this.refreshAgain = true;
+        else this.problem = { type: 'unauthorized' };
+      }
+      else if (error && error.kind === 'rateLimited') {
+        // GitHub의 한도 창은 1시간이다. 이 PC 시계가 틀려 다시 쓸 시각이 아주 멀어 보여도 1시간 넘게 쉬지 않는다.
+        const limit = Date.parse(this.deps.now()) + 3600 * 1000;
+        const resetAt = error.resetAt ? new Date(Math.min(Date.parse(error.resetAt), limit)).toISOString() : null;
+        this.problem = { type: 'rateLimited', resetAt };
+      }
       else if (error && error.kind === 'http') this.problem = { type: 'network', detail: `HTTP ${error.status} ${error.message}`.trim() };
-      else this.problem = { type: 'network', detail: (error && error.message) || String(error) };
+      else this.problem = { type: 'network', detail: this.networkDetail(error) };
     }
+  }
+
+  /**
+   * 네트워크 오류를 화면 언어로 풀어 쓴다. Node fetch는 'fetch failed'처럼 영어로만 알려 줘서,
+   * 흔한 경우(시간 초과·연결 없음)는 번역한 문구로 바꾼다(macOS판은 시스템이 번역한 설명을 쓴다).
+   */
+  networkDetail(error) {
+    const message = (error && error.message) || String(error);
+    const l10n = this.deps.l10n;
+    if (/abort|timeout|timed out/i.test(message)) return l10n.t('The request timed out.');
+    if (/fetch failed|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ENETUNREACH|EHOSTUNREACH/i.test(message)) {
+      return l10n.t('You appear to be offline.');
+    }
+    return message;
   }
 
   // MARK: 목록
@@ -224,7 +290,8 @@ class AppModel {
       else this.settings.query[key] = value;
     }
     this.settings = normalizeSettings(this.settings);
-    this.saveSettings();
+    // 검색어는 저장하지 않으므로, 글자를 칠 때마다 설정 파일을 다시 쓰지 않는다.
+    if (Object.keys(patch || {}).some((key) => key !== 'search')) this.saveSettings();
     this.emit();
   }
 
@@ -323,7 +390,9 @@ class AppModel {
 
   /** 잘못 눌렀을 때 되돌릴 수 있게 방금 읽음으로 바꾼 항목을 잠시(undoMs) 남긴다. */
   offerUndo(ids) {
-    const undo = { ids };
+    // stamp: 같은 개수를 다시 읽음으로 바꿔도 새 되돌리기로 알아보게(화면 읽기 알림) 매번 다른 값을 둔다.
+    this.undoStamp = (this.undoStamp || 0) + 1;
+    const undo = { ids, stamp: this.undoStamp };
     this.readUndo = undo;
     const timer = setTimeout(() => {
       if (this.readUndo !== undo) return;
@@ -430,13 +499,29 @@ class AppModel {
   // MARK: 새 버전
 
   async checkForUpdate() {
+    this.lastUpdateCheck = Date.parse(this.deps.now());
     try {
       const latest = await this.deps.fetchLatestVersion();
       this.availableUpdate = latest && Prefs.isNewerVersion(latest, this.deps.version) ? latest : null;
+      this.notifyUpdate();
       this.emit();
     } catch {
       // 다음 확인 때 다시 본다.
     }
+  }
+
+  /**
+   * 새 버전을 패널 띠뿐 아니라 시스템 알림으로도 바로 알린다. 패널을 열지 않는 사용자도 알 수 있게 한다.
+   * 같은 버전은 한 번만 알린다(앱을 다시 켜도 다시 알리지 않는다). 알림을 꺼 둔 사용자에게는 띠만 보인다.
+   */
+  notifyUpdate() {
+    const version = this.availableUpdate;
+    const prefs = this.settings.notificationPrefs;
+    if (!version || version === this.settings.notifiedUpdate || !prefs.isEnabled) return;
+    this.deps.notifier.postUpdate(version, prefs.playsSound);
+    // 실제로 알린 뒤에만 '알림'으로 기록한다. 알림을 꺼 둔 동안 나온 버전은 다시 켜면 다음 확인 때 알린다.
+    this.settings.notifiedUpdate = version;
+    this.saveSettings();
   }
 
   copyUpdateCommand() {
@@ -452,6 +537,10 @@ class AppModel {
     if (this.tokenSaveFailed) return this.emit();
     // 다른 계정일 수 있으니 기록을 비우고 첫 실행처럼 다시 채운다.
     this.accountGeneration += 1;
+    this.cachedToken = null;
+    this.lastTokenValue = null;
+    // 앞 계정의 문제(한도 초과 등)가 새 계정의 첫 확인을 막지 않게 지운다.
+    this.problem = null;
     this.state = WatchState.createState();
     this.saveState();
     this.emit();
@@ -461,6 +550,9 @@ class AppModel {
   removeSavedToken() {
     this.deps.tokens.remove();
     this.accountGeneration += 1;
+    this.cachedToken = null;
+    this.lastTokenValue = null;
+    this.problem = null;
     this.state = WatchState.createState();
     this.saveState();
     this.emit();
@@ -544,6 +636,8 @@ class AppModel {
         id: Query.sectionID(section.key),
         title: l10n.sectionTitle(section.key),
         repo: section.key.repo || null,
+        /** 'day' | 'repository' | 'unread' | 'read'. 묶음 머리줄 아이콘을 고른다. */
+        type: section.key.type,
         count: section.events.length,
         unreadCount: section.events.filter((event) => event.isUnread).length,
         events: section.events.map((event) => ({
@@ -568,6 +662,8 @@ class AppModel {
         ? l10n.format('Checked %@ · %lld repositories', l10n.clock(this.state.lastChecked), this.state.checkedRepos.length)
         : l10n.t('Checking…'),
       availableUpdate: this.availableUpdate,
+      /** 새 버전 띠의 도움말에 보이는 업데이트 명령(복사하는 명령과 같다). */
+      updateCommand: UPDATE_COMMAND,
       account: {
         isConnected, text: accountText, hint: accountHint,
         canRemove: this.tokenSource === 'saved', needsToken: this.tokenSource == null || isExpired,
@@ -575,7 +671,7 @@ class AppModel {
       /** 문제 안내 옆에 '설정 열기'를 붙일지(토큰 문제는 설정에서 고친다). */
       problemOpensSettings: isExpired,
       tokenSaveFailed: this.tokenSaveFailed,
-      readUndo: this.readUndo ? { text: l10n.format('Marked %lld items as read', this.readUndo.ids.length) } : null,
+      readUndo: this.readUndo ? { text: l10n.format('Marked %lld items as read', this.readUndo.ids.length), stamp: this.readUndo.stamp } : null,
       settings: {
         refreshMinutes: this.settings.refreshMinutes,
         refreshChoices: REFRESH_CHOICES,
