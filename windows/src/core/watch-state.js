@@ -26,14 +26,24 @@ const DEFAULT_CONFIG = Object.freeze({
    * 조건부 요청(ETag)으로 304를 받을 수 있다(304는 API 한도에 세지 않는다). 더 읽는 앞부분은 본 항목으로 걸러진다.
    */
   sinceGranularity: 10 * 60 * 1000,
+  /**
+   * 바뀐 신호(새 push, 알림함 소식)가 없는 저장소를 다시 읽는 간격. 신호가 있으면 바로 읽는다.
+   * 알림함에 오지 않는 활동(구독하지 않은 저장소의 댓글 등)은 이 간격 안에 잡힌다.
+   */
+  quietRecheck: 15 * 60 * 1000,
+  /** API 한도가 이만큼 남지 않으면 미뤄도 되는 일(조용한 저장소 다시 읽기, push 커밋 제목)을 하지 않는다. */
+  lowBudget: 300,
 });
 
 /**
  * retrySince: 지난 확인 때 읽지 못한 저장소와, 다음에 거기서부터 다시 읽을 시각(ISO).
  * 일부 저장소가 실패해도 lastChecked는 앞으로 가므로, 이 값이 없으면 그 저장소의 그 사이 활동이 빠진다.
  */
+/**
+ * lastRead: 저장소마다 마지막으로 다 읽은 시각(ISO). 다음에 거기서부터 읽고, 바뀐 신호가 없으면 quietRecheck가 지날 때까지 읽지 않는다.
+ */
 function createState() {
-  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {} };
+  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {}, lastRead: {} };
 }
 
 /** 형식이 다르거나 망가진 상태면 로그인 이름만 남기고 비운다. 시각이 망가진 값은 버린다(확인마다 오류로 멈추지 않게). */
@@ -44,6 +54,7 @@ function migrated(state) {
     if (merged.lastChecked != null && !valid(merged.lastChecked)) merged.lastChecked = null;
     merged.history = merged.history.filter((event) => event && valid(event.time));
     merged.retrySince = Object.fromEntries(Object.entries(merged.retrySince || {}).filter(([, value]) => valid(value)));
+    merged.lastRead = Object.fromEntries(Object.entries(merged.lastRead || {}).filter(([, value]) => valid(value)));
     return merged;
   }
   const fresh = createState();
@@ -223,8 +234,34 @@ function selectRepos(repos, notifications, { since, now, config = DEFAULT_CONFIG
   return [...selected].sort();
 }
 
+/**
+ * 이번 확인에서 읽을 저장소를 고른다(RepoSelector.plan과 같은 규칙).
+ * - 바로 읽음: 마지막으로 읽은 뒤 push가 있었거나 알림함 소식이 온 저장소, 지난번에 실패한 저장소, 처음 보는 활동 저장소.
+ * - 조금 뒤 읽음: 최근 push가 있었지만(activeWindow) 신호가 없는 저장소는 quietRecheck마다 한 번.
+ * - 알림함을 읽을 수 없으면(notifications가 null) 조용한 저장소도 매번 읽고, API 한도가 넉넉하지 않으면 미룬다.
+ */
+function planRepos(repos, notifications, { lastRead = {}, retry = [], since, now, lowBudget = false, config = DEFAULT_CONFIG }) {
+  const activeSince = time(now) - config.activeWindow;
+  const selected = new Set(retry);
+  for (const repo of repos) {
+    if (repo.archived === true || repo.pushed_at == null || time(repo.pushed_at) < activeSince) continue;
+    const read = lastRead[repo.full_name];
+    if (!read) { selected.add(repo.full_name); continue; }
+    const changed = time(repo.pushed_at) > time(read) - config.overlap;
+    const due = notifications == null || time(now) - time(read) >= config.quietRecheck;
+    if (changed || (due && !lowBudget)) selected.add(repo.full_name);
+  }
+  for (const thread of notifications || []) {
+    const read = lastRead[thread.repository.full_name];
+    const from = read ? time(read) - config.overlap : time(since);
+    if (time(thread.updated_at) >= from) selected.add(thread.repository.full_name);
+  }
+  return [...selected].sort();
+}
+
 module.exports = {
   CURRENT_VERSION,
+  planRepos,
   DEFAULT_CONFIG,
   createState,
   migrated,

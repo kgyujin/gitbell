@@ -33,9 +33,16 @@ public struct ActivityPoller: Sendable {
         let retry = state.retrySince ?? [:]
         // 지난번에 읽지 못한 저장소는 그때부터 다시 읽는다(하루보다 오래된 것은 읽지 않는다).
         let oldest = Self.rounded(now.addingTimeInterval(-config.firstRunLookback), config: config)
+        // 저장소마다 마지막으로 읽은 때부터 읽는다(조용한 저장소는 매번 읽지 않으므로 전체 since보다 앞일 수 있다).
+        let lastRead = state.lastRead ?? [:]
+        let overlap = config.overlap
+        let roundedConfig = config
         let sinceFor: @Sendable (String) -> Date = { repo in
-            guard let pending = retry[repo] else { return since }
-            return max(oldest, min(since, pending))
+            if let pending = retry[repo] { return max(oldest, min(since, pending)) }
+            if let read = lastRead[repo] {
+                return max(oldest, min(since, Self.rounded(read.addingTimeInterval(-overlap), config: roundedConfig)))
+            }
+            return since
         }
 
         async let repos = api.get(
@@ -46,8 +53,10 @@ public struct ActivityPoller: Sendable {
         // 실패해도 멈추지 않고 최근 push가 있는 저장소만으로 계속한다. 토큰 자체가 틀린 401만 그대로 올린다.
         let notifications: [GHNotification]?
         do {
-            notifications = try await api.get("notifications?all=true&since=\(Self.iso(since))&per_page=50",
-                                              as: [GHNotification].self)
+            // 알림함은 1시간 단위로 맞춘 since로 읽는다. 같은 주소가 1시간 동안 반복돼 304(한도 미사용)를 받는다.
+            // 넓게 읽은 앞부분은 저장소별 마지막 읽은 시각과 견줘 거른다(RepoSelector.plan).
+            notifications = try await api.get(
+                "notifications?all=true&since=\(Self.iso(Self.hourly(since)))&per_page=50", as: [GHNotification].self)
         } catch GitHubError.unauthorized {
             throw GitHubError.unauthorized
         } catch let GitHubError.rateLimited(resetAt) {
@@ -60,9 +69,10 @@ public struct ActivityPoller: Sendable {
         } catch {
             notifications = nil
         }
-        let picked = RepoSelector.select(repos: try await repos, notifications: notifications ?? [],
-                                         since: since, now: now, config: config)
-        let selected = Array(Set(picked).union(retry.keys)).sorted()
+        let lowBudget = (await api.remainingRequests()).map { $0 < config.lowBudget } ?? false
+        let selected = RepoSelector.plan(repos: try await repos, notifications: notifications, lastRead: lastRead,
+                                         retry: Set(retry.keys), since: since, now: now, lowBudget: lowBudget,
+                                         config: config)
 
         let (events, failed, retryable, rateLimit) = await collect(selected, sinceFor: sinceFor)
         // 저장소를 읽다가 한도에 걸렸으면 이번 결과를 버린다. 마지막 확인 시각을 그대로 두어야
@@ -76,11 +86,16 @@ public struct ActivityPoller: Sendable {
         let isFirstRun = state.lastChecked == nil
         let nextRetry = isFirstRun ? [:] : Dictionary(uniqueKeysWithValues: retryable.map { ($0, sinceFor($0)) })
         state.retrySince = nextRetry.isEmpty ? nil : nextRetry
+        var nextRead = lastRead.filter { now.timeIntervalSince($0.value) < config.activeWindow }
+        for repo in selected where !failed.contains(repo) { nextRead[repo] = now }
+        state.lastRead = nextRead.isEmpty ? nil : nextRead
         var newEvents = state.apply(events, now: now, includeOwn: includeOwn, config: config)
 
         // push의 커밋 제목은 기록에 새로 들어온 push에만 한 번 읽어 API 호출을 줄인다.
         // 몇 개씩 동시에 읽고, 한도에 걸리면 남은 것은 다음 확인으로 미룬다(더 보내도 실패하고 2차 한도 위험만 커진다).
-        let pending = state.history.filter { $0.kind.isPush && !$0.detailResolved }
+        // API 한도가 넉넉하지 않으면 커밋 제목은 다음으로 미룬다(목록에는 제목 없이 먼저 보인다).
+        let budgetLow = (await api.remainingRequests()).map { $0 < config.lowBudget } ?? false
+        let pending = budgetLow ? [] : state.history.filter { $0.kind.isPush && !$0.detailResolved }
         for start in stride(from: 0, to: pending.count, by: config.maxConcurrentRepos) {
             let chunk = pending[start..<min(start + config.maxConcurrentRepos, pending.count)]
             let results = await withTaskGroup(of: PushDetail.self) { group in
@@ -105,6 +120,11 @@ public struct ActivityPoller: Sendable {
         let oldest = now.addingTimeInterval(-config.firstRunLookback)
         let wanted = lastChecked.map { $0.addingTimeInterval(-config.overlap) } ?? oldest
         return rounded(max(wanted, oldest), config: config)
+    }
+
+    /// 1시간 단위로 내려 맞춘다(알림함 since용).
+    static func hourly(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: (date.timeIntervalSince1970 / 3600).rounded(.down) * 3600)
     }
 
     /// sinceGranularity 단위로 내려 맞춘다(같은 since 주소를 다시 써서 304를 받으려고).

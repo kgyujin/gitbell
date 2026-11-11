@@ -98,3 +98,33 @@ test('확인: 커밋 제목을 읽다 한도에 걸리면 남은 push는 다음�
   assert.equal(pushCalls.length, WatchState.DEFAULT_CONFIG.maxConcurrentRepos, '한도에 걸린 묶음까지만, 마지막 커밋으로 다시 읽지 않는다');
   assert.ok(result.state.history.every((event) => !event.detailResolved), '다음 확인 때 다시 읽는다');
 });
+
+// 조용한 저장소는 덜 자주, 바뀐 저장소는 바로(PollerReliabilityTests.swift와 같은 경우).
+test('요청 줄이기: 새 push가 없는 저장소는 15분마다만 다시 읽는다', () => {
+  const repos = [{ full_name: 'o/quiet', pushed_at: '2026-11-09T09:00:00Z' }, { full_name: 'o/busy', pushed_at: '2026-11-09T11:59:00Z' }];
+  const lastRead = { 'o/quiet': '2026-11-09T11:55:00Z', 'o/busy': '2026-11-09T11:55:00Z' };
+  assert.deepEqual(WatchState.planRepos(repos, [], { lastRead, since: '2026-11-09T11:50:00Z', now: '2026-11-09T12:00:00Z' }), ['o/busy']);
+  assert.deepEqual(WatchState.planRepos(repos, [], { lastRead, since: '2026-11-09T12:00:00Z', now: '2026-11-09T12:10:00Z' }),
+    ['o/busy', 'o/quiet'], '15분이 지나면 조용한 저장소도 읽는다');
+});
+
+test('요청 줄이기: 알림함 소식은 바로 읽고, 한도가 넉넉하지 않으면 조용한 저장소는 미룬다', () => {
+  const repos = [{ full_name: 'o/quiet', pushed_at: '2026-11-09T09:00:00Z' }];
+  const lastRead = { 'o/quiet': '2026-11-09T11:00:00Z' };
+  const notifications = [{ updated_at: '2026-11-09T11:58:00Z', repository: { full_name: 'o/talk' } }];
+  assert.deepEqual(WatchState.planRepos(repos, notifications,
+    { lastRead, since: '2026-11-09T11:50:00Z', now: '2026-11-09T12:00:00Z', lowBudget: true }), ['o/talk']);
+  assert.deepEqual(WatchState.planRepos(repos, null, { lastRead, since: '2026-11-09T11:50:00Z', now: '2026-11-09T12:00:00Z' }),
+    ['o/quiet'], '알림함을 읽을 수 없으면 신호가 없어 매번 읽는다');
+});
+
+test('요청 줄이기: 한도가 넉넉하지 않으면 push 커밋 제목을 읽지 않는다', async () => {
+  const pushes = [{ id: 1, activity_type: 'push', ref: 'refs/heads/main', before: 'a', after: 'b', actor: { login: 'amy' }, timestamp: '2026-11-09T11:59:00Z' }];
+  const api = recordingGitHub([
+    ['user/repos', [{ full_name: 'o/a', pushed_at: '2026-11-09T11:59:00Z', archived: false }]],
+    ['notifications', []], ['repos/o/a/activity', pushes], ...repoRoutes('o/a'),
+  ]);
+  api.remaining = () => 120;
+  await Poller.refresh(api, state('2026-11-09T11:58:00Z'), { now: '2026-11-09T12:00:00Z', includeOwn: false });
+  assert.equal(api.paths.filter((p) => p.includes('/compare/') || p.includes('/commits/')).length, 0);
+});

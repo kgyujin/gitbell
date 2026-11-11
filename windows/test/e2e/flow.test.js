@@ -28,7 +28,8 @@ function routes({ withNewPush = false } = {}) {
     activity.push({ id: 2, activity_type: 'push', ref: 'refs/heads/feat/x', before: 'ccc', after: 'ddd', actor: user('bob'), timestamp: minutesAgo(0) });
   }
   return [
-    ['user/repos', [{ full_name: 'acme/web', pushed_at: pushTime, archived: false }]],
+    // 실제 GitHub처럼 새 push가 있으면 저장소의 pushed_at도 그 시각으로 바뀐다(GitBell은 이 값으로 바뀐 저장소를 알아본다).
+    ['user/repos', [{ full_name: 'acme/web', pushed_at: activity.at(-1).timestamp, archived: false }]],
     ['user', { login: 'me' }],
     ['notifications', []],
     ['repos/acme/web/pulls/comments', []],

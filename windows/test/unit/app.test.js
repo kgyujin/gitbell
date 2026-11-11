@@ -45,6 +45,15 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
         if (!key) throw new GitHubError('http', 'Not Found', 404);
         const value = routes[key];
         if (value instanceof Error) throw value;
+        // 실제 GitHub처럼 저장소의 pushed_at은 그 저장소 활동 중 가장 최근 push 시각을 따른다
+        // (GitBell은 이 값으로 바뀐 저장소를 알아본다).
+        if (key === 'user/repos') {
+          return value.map((repo) => {
+            const activity = routes[`repos/${repo.full_name}/activity`] || [];
+            const latest = activity.map((item) => item.timestamp).filter(Boolean).sort().at(-1);
+            return latest && (!repo.pushed_at || latest > repo.pushed_at) ? { ...repo, pushed_at: latest } : { ...repo };
+          });
+        }
         return JSON.parse(JSON.stringify(value));
       },
     }),

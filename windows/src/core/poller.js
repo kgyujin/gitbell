@@ -55,7 +55,14 @@ async function refresh(api, current, { now, includeOwn, config = WatchState.DEFA
   const retry = state.retrySince || {};
   // 지난번에 읽지 못한 저장소는 그때부터 다시 읽는다(하루보다 오래된 것은 읽지 않는다).
   const oldest = rounded(Date.parse(now) - config.firstRunLookback, config);
-  const sinceFor = (repo) => (retry[repo] ? iso(Math.max(oldest, Math.min(sinceMs, Date.parse(retry[repo])))) : since);
+  // 저장소마다 마지막으로 읽은 때부터 읽는다(조용한 저장소는 매번 읽지 않으므로 전체 since보다 앞일 수 있다).
+  const lastRead = state.lastRead || {};
+  const sinceFor = (repo) => {
+    if (retry[repo]) return iso(Math.max(oldest, Math.min(sinceMs, Date.parse(retry[repo]))));
+    if (lastRead[repo]) return iso(Math.max(oldest, Math.min(sinceMs, rounded(Date.parse(lastRead[repo]) - config.overlap, config))));
+    return since;
+  };
+  const budgetLow = () => api.remaining && api.remaining() != null && api.remaining() < config.lowBudget;
 
   // 알림함은 저장소를 고르는 보조 자료다. 세분화 토큰(fine-grained)처럼 알림함을 읽을 수 없는 토큰이면
   // 실패해도 멈추지 않고 최근 push가 있는 저장소만으로 계속한다. 토큰 자체가 틀린 401만 그대로 올린다.
@@ -70,10 +77,12 @@ async function refresh(api, current, { now, includeOwn, config = WatchState.DEFA
   const [repos, notifications] = await Promise.all([
     api.get(`user/repos?sort=pushed&direction=desc&per_page=${config.discoveryPageSize}`
       + '&affiliation=owner,collaborator,organization_member'),
-    api.get(`notifications?all=true&since=${since}&per_page=50`).catch(optional),
+    // 알림함은 1시간 단위로 맞춘 since로 읽는다. 같은 주소가 1시간 동안 반복돼 304(한도 미사용)를 받는다.
+    // 넓게 읽은 앞부분은 저장소별 마지막 읽은 시각과 견줘 거른다(planRepos).
+    api.get(`notifications?all=true&since=${iso(Math.floor(sinceMs / 3600000) * 3600000)}&per_page=50`).catch(optional),
   ]);
-  const picked = WatchState.selectRepos(repos, notifications || [], { since, now, config });
-  const selected = [...new Set([...picked, ...Object.keys(retry)])].sort();
+  const selected = WatchState.planRepos(repos, notifications, {
+    lastRead, retry: Object.keys(retry), since, now, lowBudget: budgetLow(), config });
 
   const { events, failed, retryable, rateLimit } = await collect(api, selected, sinceFor, config);
   // 저장소를 읽다가 한도에 걸렸으면 이번 결과를 버린다. 마지막 확인 시각을 그대로 두어야
@@ -86,11 +95,15 @@ async function refresh(api, current, { now, includeOwn, config = WatchState.DEFA
   // '처음 실행이 아닌' 새 항목으로 읽어, 설치하자마자 오래된 알림이 한꺼번에 왔다.
   const isFirstRun = state.lastChecked == null;
   state.retrySince = isFirstRun ? {} : Object.fromEntries(retryable.map((repo) => [repo, sinceFor(repo)]));
+  const nextRead = Object.fromEntries(Object.entries(lastRead).filter(([, value]) => Date.parse(now) - Date.parse(value) < config.activeWindow));
+  for (const repo of selected) if (!failed.includes(repo)) nextRead[repo] = now;
+  state.lastRead = nextRead;
   const newEvents = WatchState.apply(state, events, { now, includeOwn, config });
 
   // push의 커밋 제목은 기록에 새로 들어온 push에만 한 번 읽어 API 호출을 줄인다.
   // 몇 개씩 동시에 읽고, 한도에 걸리면 남은 것은 다음 확인으로 미룬다(더 보내도 실패하고 2차 한도 위험만 커진다).
-  const pending = state.history.filter((e) => isPush(e.kind) && !e.detailResolved);
+  // API 한도가 넉넉하지 않으면 커밋 제목은 다음으로 미룬다(목록에는 제목 없이 먼저 보인다).
+  const pending = budgetLow() ? [] : state.history.filter((e) => isPush(e.kind) && !e.detailResolved);
   const details = await inChunks(pending, config.maxConcurrentRepos, (event) => resolvePushDetail(api, event),
     (detail) => detail.hitRateLimit);
   for (const { event: resolved } of details) {

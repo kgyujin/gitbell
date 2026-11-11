@@ -42,6 +42,8 @@ function createResponseCache({ limit = 200, byteLimit = 8 * 1024 * 1024 } = {}) 
   const entries = new Map();
   let currentToken = null;
   let totalBytes = 0;
+  /** 마지막 응답이 알려 준 남은 API 한도(x-ratelimit-remaining). 304도 알려 준다. */
+  let remaining = null;
   const forget = (key) => {
     const old = entries.get(key);
     if (old) totalBytes -= old.text.length;
@@ -70,6 +72,8 @@ function createResponseCache({ limit = 200, byteLimit = 8 * 1024 * 1024 } = {}) 
       while (entries.size > limit || (totalBytes > byteLimit && entries.size > 1)) forget(entries.keys().next().value);
     },
     get size() { return entries.size; },
+    noteRemaining(value) { if (Number.isFinite(value)) remaining = value; },
+    get remaining() { return remaining; },
   };
 }
 
@@ -87,6 +91,8 @@ function isReusable(path) {
 function createGitHubAPI({ token, baseURL = 'https://api.github.com/', fetch: fetchImpl = fetch, timeoutMs = 20000, cache = null }) {
   const base = baseURL.endsWith('/') ? baseURL : `${baseURL}/`;
   return {
+    /** 마지막 응답이 알려 준 남은 API 한도. 모르면 null. */
+    remaining() { return cache ? cache.remaining : null; },
     async get(path) {
       // 토큰이 바뀌었으면 보관소를 비운다(만드는 쪽이 따로 챙기지 않아도 다른 계정의 응답을 쓰지 않는다).
       if (cache) cache.use(token);
@@ -106,6 +112,8 @@ function createGitHubAPI({ token, baseURL = 'https://api.github.com/', fetch: fe
       } catch (error) {
         throw new GitHubError('network', error && error.message ? error.message : String(error));
       }
+      const headerValue = (name) => (response.headers && typeof response.headers.get === 'function' ? response.headers.get(name) : null);
+      if (cache && headerValue('x-ratelimit-remaining') != null) cache.noteRemaining(Number(headerValue('x-ratelimit-remaining')));
       if (response.status === 401) throw new GitHubError('unauthorized', '', 401);
       // 바뀐 것이 없다: 보관한 본문을 그대로 쓴다(이 응답은 API 한도에 세지 않는다).
       if (response.status === 304 && cached) {

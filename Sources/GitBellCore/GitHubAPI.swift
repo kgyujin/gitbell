@@ -41,6 +41,12 @@ public actor ResponseCache {
     private var order: [String] = []
     private var totalBytes = 0
     private var token: String?
+    /// 마지막 응답이 알려 준 남은 API 한도. 304도 알려 준다.
+    public private(set) var remaining: Int?
+
+    public func noteRemaining(_ value: Int?) {
+        if let value { remaining = value }
+    }
     /// 저장소마다 PR 목록·활동·댓글과 바뀐 PR의 리뷰 몇 개를 보관한다. 수십 개 저장소를 보는 경우에도 들어가는 수다.
     private let limit: Int
     /// 본문 크기 합의 상한. PR 목록은 한 번에 100KB를 넘기도 해서, 개수만으로는 메모리를 묶지 못한다.
@@ -94,6 +100,12 @@ public actor ResponseCache {
 
 public protocol GitHubAPI: Sendable {
     func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T
+    /// 마지막 응답이 알려 준 남은 API 한도(x-ratelimit-remaining). 모르면 nil.
+    func remainingRequests() async -> Int?
+}
+
+extension GitHubAPI {
+    public func remainingRequests() async -> Int? { nil }
 }
 
 public struct URLSessionGitHubAPI: GitHubAPI {
@@ -118,6 +130,8 @@ public struct URLSessionGitHubAPI: GitHubAPI {
         self.session = session
         self.cache = cache
     }
+
+    public func remainingRequests() async -> Int? { await cache?.remaining }
 
     public func get<T: Decodable>(_ path: String, as type: T.Type) async throws -> T {
         guard let url = URL(string: path, relativeTo: baseURL) else {
@@ -146,6 +160,8 @@ public struct URLSessionGitHubAPI: GitHubAPI {
             throw GitHubError.network(error.localizedDescription)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        await cache?.noteRemaining((response as? HTTPURLResponse)?.value(forHTTPHeaderField: "x-ratelimit-remaining")
+            .flatMap(Int.init))
         if status == 401 { throw GitHubError.unauthorized }
         // 바뀐 것이 없다: 보관한 본문을 그대로 쓴다(이 응답은 API 한도에 세지 않는다).
         if status == 304, let cached { return try GitHubJSON.decoder().decode(T.self, from: cached.data) }

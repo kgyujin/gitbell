@@ -131,4 +131,36 @@ final class PollerReliabilityTests: XCTestCase {
                        "한도에 걸린 묶음까지만 보내고, 마지막 커밋으로 다시 읽지 않는다")
         XCTAssertTrue(result.state.history.allSatisfy { !$0.detailResolved }, "다음 확인 때 다시 읽는다")
     }
+
+    // MARK: 조용한 저장소는 덜 자주, 바뀐 저장소는 바로
+
+    private func repo(_ name: String, pushedAt: String) -> GHRepo {
+        try! GitHubJSON.decoder().decode(GHRepo.self, from: Data(#"{"full_name":"\#(name)","pushed_at":"\#(pushedAt)","archived":false}"#.utf8))
+    }
+
+    func testQuietRepoIsReadOnlyEveryQuietRecheck() {
+        let now = date("2026-11-09T12:00:00Z")
+        let repos = [repo("o/quiet", pushedAt: "2026-11-09T09:00:00Z"), repo("o/busy", pushedAt: "2026-11-09T11:59:00Z")]
+        let lastRead = ["o/quiet": date("2026-11-09T11:55:00Z"), "o/busy": date("2026-11-09T11:55:00Z")]
+        let plan = RepoSelector.plan(repos: repos, notifications: [], lastRead: lastRead, retry: [],
+                                     since: date("2026-11-09T11:50:00Z"), now: now, lowBudget: false)
+        XCTAssertEqual(plan, ["o/busy"], "새 push가 있는 저장소만 바로 읽는다")
+        let later = RepoSelector.plan(repos: repos, notifications: [], lastRead: lastRead, retry: [],
+                                      since: date("2026-11-09T12:00:00Z"), now: date("2026-11-09T12:10:00Z"), lowBudget: false)
+        XCTAssertEqual(later, ["o/busy", "o/quiet"], "조용한 저장소도 15분이 지나면 다시 읽는다")
+    }
+
+    func testNotificationSignalsRepoAndLowBudgetSkipsQuietRepos() {
+        let repos = [repo("o/quiet", pushedAt: "2026-11-09T09:00:00Z")]
+        let lastRead = ["o/quiet": date("2026-11-09T11:00:00Z")]
+        let notification = try! GitHubJSON.decoder().decode(GHNotification.self, from: Data(#"""
+        {"updated_at":"2026-11-09T11:58:00Z","repository":{"full_name":"o/talk"}}
+        """#.utf8))
+        let plan = RepoSelector.plan(repos: repos, notifications: [notification], lastRead: lastRead, retry: [],
+                                     since: date("2026-11-09T11:50:00Z"), now: date("2026-11-09T12:00:00Z"), lowBudget: true)
+        XCTAssertEqual(plan, ["o/talk"], "알림함 소식이 온 저장소는 읽고, 한도가 넉넉하지 않으면 조용한 저장소는 미룬다")
+        let noInbox = RepoSelector.plan(repos: repos, notifications: nil, lastRead: lastRead, retry: [],
+                                        since: date("2026-11-09T11:50:00Z"), now: date("2026-11-09T12:00:00Z"), lowBudget: false)
+        XCTAssertEqual(noInbox, ["o/quiet"], "알림함을 읽을 수 없으면 신호가 없어 매번 읽는다")
+    }
 }

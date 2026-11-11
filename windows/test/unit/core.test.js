@@ -217,7 +217,9 @@ test('Poller: 다음 실행은 커밋 제목을 채운 push를 알린다', async
 test('Poller: since는 밀리초 없는 ISO 시각으로 보낸다', async () => {
   const fake = api(recent);
   await Poller.refresh(fake, laterState(), { now, includeOwn: false });
-  assert.ok(fake.calls.includes('notifications?all=true&since=2026-11-09T04:50:00Z&per_page=50'), fake.calls.join('\n'));
+  // 댓글은 10분 단위, 알림함은 1시간 단위로 맞춘 since를 쓴다(같은 주소가 반복돼 304를 받도록).
+  assert.ok(fake.calls.some((call) => call.includes('issues/comments?since=2026-11-09T04:50:00Z')), fake.calls.join('\n'));
+  assert.ok(fake.calls.includes('notifications?all=true&since=2026-11-09T04:00:00Z&per_page=50'), fake.calls.join('\n'));
 });
 
 test('Poller: compare가 실패하면 마지막 커밋 제목만 읽는다', async () => {
