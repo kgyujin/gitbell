@@ -106,6 +106,8 @@ test('요청 줄이기: 새 push가 없는 저장소는 15분마다만 다시 �
   assert.deepEqual(WatchState.planRepos(repos, [], { lastRead, since: '2026-11-09T11:50:00Z', now: '2026-11-09T12:00:00Z' }), ['o/busy']);
   assert.deepEqual(WatchState.planRepos(repos, [], { lastRead, since: '2026-11-09T12:00:00Z', now: '2026-11-09T12:10:00Z' }),
     ['o/busy', 'o/quiet'], '15분이 지나면 조용한 저장소도 읽는다');
+  assert.deepEqual(WatchState.planRepos(repos, [], { lastRead, since: '2026-11-09T11:50:00Z', now: '2026-11-09T12:00:00Z', readAll: true }),
+    ['o/busy', 'o/quiet'], '직접 새로고침하면 조용한 저장소도 지금 읽는다');
 });
 
 test('요청 줄이기: 알림함 소식은 바로 읽고, 한도가 넉넉하지 않으면 조용한 저장소는 미룬다', () => {

@@ -327,7 +327,7 @@ struct OnboardingView: View {
                             .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.06)))
                             .textSelection(.enabled)
                         Spacer()
-                        PillButton(symbol: "arrow.clockwise", title: L10n.string("Check again")) { Task { await model.refresh() } }
+                        PillButton(symbol: "arrow.clockwise", title: L10n.string("Check again")) { Task { await model.refreshNow() } }
                     }
                 }
             }

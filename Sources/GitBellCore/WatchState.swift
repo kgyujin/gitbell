@@ -161,8 +161,9 @@ public enum RepoSelector {
     /// - 바로 읽음: 마지막으로 읽은 뒤 push가 있었거나 알림함 소식이 온 저장소, 지난번에 실패한 저장소, 처음 보는 활동 저장소.
     /// - 조금 뒤 읽음: 최근 push가 있었지만(activeWindow) 신호가 없는 저장소는 quietRecheck마다 한 번.
     /// - 알림함을 읽을 수 없거나(세분화 토큰) API 한도가 넉넉하지 않으면 각각 조용한 저장소도 매번 읽거나, 아예 미룬다.
+    /// readAll: 사용자가 직접 새로고침했으면 조용한 저장소도 모두 지금 읽는다.
     public static func plan(repos: [GHRepo], notifications: [GHNotification]?, lastRead: [String: Date],
-                            retry: Set<String>, since: Date, now: Date, lowBudget: Bool,
+                            retry: Set<String>, since: Date, now: Date, lowBudget: Bool, readAll: Bool = false,
                             config: WatchConfig = WatchConfig()) -> [String] {
         let activeSince = now.addingTimeInterval(-config.activeWindow)
         var selected = retry
@@ -171,7 +172,7 @@ public enum RepoSelector {
             guard let read = lastRead[repo.fullName] else { selected.insert(repo.fullName); continue }
             let changed = pushed > read.addingTimeInterval(-config.overlap)
             let due = notifications == nil || now.timeIntervalSince(read) >= config.quietRecheck
-            if changed || (due && !lowBudget) { selected.insert(repo.fullName) }
+            if changed || readAll || (due && !lowBudget) { selected.insert(repo.fullName) }
         }
         for thread in notifications ?? [] {
             let from = lastRead[thread.repository.fullName].map { $0.addingTimeInterval(-config.overlap) } ?? since

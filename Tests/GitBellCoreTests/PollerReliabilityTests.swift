@@ -148,6 +148,9 @@ final class PollerReliabilityTests: XCTestCase {
         let later = RepoSelector.plan(repos: repos, notifications: [], lastRead: lastRead, retry: [],
                                       since: date("2026-11-09T12:00:00Z"), now: date("2026-11-09T12:10:00Z"), lowBudget: false)
         XCTAssertEqual(later, ["o/busy", "o/quiet"], "조용한 저장소도 15분이 지나면 다시 읽는다")
+        let manual = RepoSelector.plan(repos: repos, notifications: [], lastRead: lastRead, retry: [],
+                                       since: date("2026-11-09T11:50:00Z"), now: now, lowBudget: false, readAll: true)
+        XCTAssertEqual(manual, ["o/busy", "o/quiet"], "직접 새로고침하면 조용한 저장소도 지금 읽는다")
     }
 
     func testNotificationSignalsRepoAndLowBudgetSkipsQuietRepos() {

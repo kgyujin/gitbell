@@ -312,7 +312,7 @@ function createTray() {
   tray.on('click', togglePanel);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: l10n.t('Open GitBell'), click: () => showPanel() },
-    { label: l10n.t('Refresh'), click: () => model.refresh() },
+    { label: l10n.t('Refresh'), click: () => model.refresh({ readAll: true }) },
     { type: 'separator' },
     // 설치기가 설치한 앱에서만 보인다(개발 중에는 지울 폴더가 없다).
     ...(process.platform === 'win32' && Uninstall.isStandardInstall(app.getAppPath())
@@ -457,7 +457,8 @@ async function fetchLatestVersion() {
 /** 화면이 부를 수 있는 동작. 이름으로만 부르고, 주소 같은 값은 앱이 정한다. */
 function registerIPC() {
   const actions = {
-    refresh: () => model.refresh(),
+    // 사용자가 직접 누른 새로고침이라 조용한 저장소도 모두 읽는다.
+    refresh: () => model.refresh({ readAll: true }),
     setQuery: (patch) => model.setQuery(patch),
     resetFilters: () => model.resetFilters(),
     setShowingSearch: (on) => model.setShowingSearch(on),

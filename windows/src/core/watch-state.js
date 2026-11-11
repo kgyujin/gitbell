@@ -240,7 +240,7 @@ function selectRepos(repos, notifications, { since, now, config = DEFAULT_CONFIG
  * - 조금 뒤 읽음: 최근 push가 있었지만(activeWindow) 신호가 없는 저장소는 quietRecheck마다 한 번.
  * - 알림함을 읽을 수 없으면(notifications가 null) 조용한 저장소도 매번 읽고, API 한도가 넉넉하지 않으면 미룬다.
  */
-function planRepos(repos, notifications, { lastRead = {}, retry = [], since, now, lowBudget = false, config = DEFAULT_CONFIG }) {
+function planRepos(repos, notifications, { lastRead = {}, retry = [], since, now, lowBudget = false, readAll = false, config = DEFAULT_CONFIG }) {
   const activeSince = time(now) - config.activeWindow;
   const selected = new Set(retry);
   for (const repo of repos) {
@@ -249,7 +249,8 @@ function planRepos(repos, notifications, { lastRead = {}, retry = [], since, now
     if (!read) { selected.add(repo.full_name); continue; }
     const changed = time(repo.pushed_at) > time(read) - config.overlap;
     const due = notifications == null || time(now) - time(read) >= config.quietRecheck;
-    if (changed || (due && !lowBudget)) selected.add(repo.full_name);
+    // readAll: 사용자가 직접 새로고침했으면 조용한 저장소도 모두 지금 읽는다.
+    if (changed || readAll || (due && !lowBudget)) selected.add(repo.full_name);
   }
   for (const thread of notifications || []) {
     const read = lastRead[thread.repository.full_name];

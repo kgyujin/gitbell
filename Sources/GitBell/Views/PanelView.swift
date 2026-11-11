@@ -85,7 +85,7 @@ private struct HeaderView: View {
                 IconButton(symbol: "checkmark.circle", help: "Mark everything shown as read") { model.markRead() }
             }
             IconButton(symbol: "arrow.clockwise", help: "Refresh (⌘R)", spinning: model.isRefreshing, shortcut: "r") {
-                Task { await model.refresh() }
+                Task { await model.refreshNow() }
             }
             IconButton(symbol: "gearshape", help: "Settings (⌘,)", shortcut: ",") { model.showingSettings = true }
         }

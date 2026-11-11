@@ -24,7 +24,8 @@ public struct ActivityPoller: Sendable {
         self.config = config
     }
 
-    public func refresh(_ current: WatchState, now: Date, includeOwn: Bool) async throws -> RefreshResult {
+    /// readAll: 사용자가 직접 새로고침했으면 바뀐 신호가 없는 조용한 저장소도 지금 읽는다.
+    public func refresh(_ current: WatchState, now: Date, includeOwn: Bool, readAll: Bool = false) async throws -> RefreshResult {
         var state = current.migrated()
         if state.me.isEmpty {
             state.me = try await api.get("user", as: GHUser.self).login
@@ -72,7 +73,7 @@ public struct ActivityPoller: Sendable {
         let lowBudget = (await api.remainingRequests()).map { $0 < config.lowBudget } ?? false
         let selected = RepoSelector.plan(repos: try await repos, notifications: notifications, lastRead: lastRead,
                                          retry: Set(retry.keys), since: since, now: now, lowBudget: lowBudget,
-                                         config: config)
+                                         readAll: readAll, config: config)
 
         let (events, failed, retryable, rateLimit) = await collect(selected, sinceFor: sinceFor)
         // 저장소를 읽다가 한도에 걸렸으면 이번 결과를 버린다. 마지막 확인 시각을 그대로 두어야

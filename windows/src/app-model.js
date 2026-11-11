@@ -157,7 +157,12 @@ class AppModel {
     this.timer = setTimeout(tick, 0);
   }
 
-  async refresh() {
+  /**
+   * @param {{readAll?: boolean}} options readAll: 사용자가 직접 누른 새로고침(Ctrl+R, 새로고침 단추, 다시 확인).
+   *   조용한 저장소도 기다리지 않고 모두 읽는다.
+   */
+  async refresh({ readAll = false } = {}) {
+    if (readAll) this.readAllNext = true;
     if (this.demo) return;
     if (this.isRefreshing) {
       // 토큰을 바꾼 직후처럼 꼭 다시 확인해야 할 때는 지금 확인이 끝난 뒤 한 번 더 한다.
@@ -212,8 +217,10 @@ class AppModel {
       }
       this.lastTokenValue = token.value;
       const unreadBefore = new Set(this.state.history.filter((e) => e.isUnread).map((e) => e.id));
+      const readAll = this.readAllNext === true;
+      this.readAllNext = false;
       const result = await Poller.refresh(api, this.state,
-        { now: this.deps.now(), includeOwn: this.settings.includeOwnActivity });
+        { now: this.deps.now(), includeOwn: this.settings.includeOwnActivity, readAll });
       // 확인하는 동안 토큰이 바뀌었으면 예전 계정의 결과라 버린다(곧 다시 확인한다).
       if (account !== this.accountGeneration) return;
       // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.

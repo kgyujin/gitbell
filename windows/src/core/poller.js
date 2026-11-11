@@ -45,7 +45,7 @@ async function inChunks(list, size, work, stop = () => false) {
  * @param {{now: string, includeOwn: boolean, config?: object}} options
  * @returns {Promise<{state: object, newEvents: object[], failedRepos: string[]}>}
  */
-async function refresh(api, current, { now, includeOwn, config = WatchState.DEFAULT_CONFIG }) {
+async function refresh(api, current, { now, includeOwn, readAll = false, config = WatchState.DEFAULT_CONFIG }) {
   const state = WatchState.clone(WatchState.migrated(current));
   if (state.me === '') {
     state.me = (await api.get('user')).login;
@@ -82,7 +82,7 @@ async function refresh(api, current, { now, includeOwn, config = WatchState.DEFA
     api.get(`notifications?all=true&since=${iso(Math.floor(sinceMs / 3600000) * 3600000)}&per_page=50`).catch(optional),
   ]);
   const selected = WatchState.planRepos(repos, notifications, {
-    lastRead, retry: Object.keys(retry), since, now, lowBudget: budgetLow(), config });
+    lastRead, retry: Object.keys(retry), since, now, lowBudget: budgetLow(), readAll, config });
 
   const { events, failed, retryable, rateLimit } = await collect(api, selected, sinceFor, config);
   // 저장소를 읽다가 한도에 걸렸으면 이번 결과를 버린다. 마지막 확인 시각을 그대로 두어야

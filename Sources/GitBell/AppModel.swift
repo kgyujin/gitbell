@@ -192,6 +192,15 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 사용자가 직접 누른 새로고침(⌘R, 새로고침 단추, 다시 확인). 조용한 저장소도 기다리지 않고 모두 읽는다.
+    func refreshNow() async {
+        readAllNext = true
+        await refresh()
+    }
+
+    /// 다음 확인에서 모든 저장소를 읽을지(refreshNow).
+    private var readAllNext = false
+
     func refresh() async {
         guard !isRefreshing else {
             // 토큰을 바꾼 직후처럼 꼭 다시 확인해야 할 때는 지금 확인이 끝난 뒤 한 번 더 한다.
@@ -232,7 +241,9 @@ final class AppModel: ObservableObject {
             }
             lastTokenValue = token.value
             let unreadBefore = Set(state.history.filter(\.isUnread).map(\.id))
-            let result = try await poller.refresh(state, now: Date(), includeOwn: includeOwnActivity)
+            let readAll = readAllNext
+            readAllNext = false
+            let result = try await poller.refresh(state, now: Date(), includeOwn: includeOwnActivity, readAll: readAll)
             // 확인하는 동안 토큰이 바뀌었으면 예전 계정의 결과라 버린다(바로 다시 확인한다).
             guard account == accountGeneration else { return }
             // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.
