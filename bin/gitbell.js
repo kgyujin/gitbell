@@ -125,7 +125,18 @@ function checkSwift() {
   }
 }
 
+/** 지우다 실패해도(권한, 이미 없음) 멈추지 않는다. 정리 단계에서만 쓴다. */
+function removeQuietly(target) {
+  try {
+    fs.rmSync(target, { recursive: true, force: true });
+  } catch {
+    // 정리하지 못한 임시 파일은 macOS가 나중에 지운다.
+  }
+}
+
 function quitRunningApp() {
+  // 돌고 있지 않을 때 'quit app'을 부르면 macOS가 '앱 찾기' 창을 띄워 설치가 멈출 수 있어, 돌 때만 부른다.
+  if (run('pgrep', ['-x', 'GitBell']).status !== 0) return;
   run('osascript', ['-e', 'quit app "GitBell"']);
   run('pkill', ['-x', 'GitBell']);
 }
@@ -142,7 +153,8 @@ function install() {
     fs.cpSync(path.join(PACKAGE_ROOT, entry), path.join(workDir, entry), { recursive: true });
   }
 
-  step(t('Building on this Mac (about 1–2 minutes the first time)…', '이 Mac에서 빌드하는 중 (처음엔 1~2분)…'));
+  // 설치·업데이트할 때마다 새 임시 폴더에서 처음부터 빌드한다(이어 쓰는 빌드 결과가 없다).
+  step(t('Building on this Mac (about 1–2 minutes)…', '이 Mac에서 빌드하는 중 (1~2분 걸립니다)…'));
   const logPath = path.join(workDir, 'build.log');
   const build = run('bash', [path.join(workDir, 'scripts', 'build-app.sh'), path.join(workDir, 'dist')], {
     cwd: workDir,
@@ -153,17 +165,34 @@ function install() {
     const known = explainBuildProblem(`${build.stdout || ''}\n${build.stderr || ''}`);
     if (known) fail(known.problem, `${known.hint}\n  ${t('Full log:', '전체 로그:')} ${logPath}`);
     const tail = `${build.stdout || ''}\n${build.stderr || ''}`.trim().split('\n').slice(-15).join('\n');
+    // 로그는 남기고 수백 MB짜리 빌드 결과(.build)는 지운다.
+    removeQuietly(path.join(workDir, '.build'));
     fail(t('Build failed.', '빌드에 실패했습니다.'), `${dim(tail)}\n  ${t('Full log:', '전체 로그:')} ${logPath}`);
   }
 
   step(t(`Installing to ${APP_PATH}`, `${APP_PATH}에 설치하는 중`));
   quitRunningApp();
-  fs.mkdirSync(APP_DIR, { recursive: true });
-  fs.rmSync(APP_PATH, { recursive: true, force: true });
-  // ditto는 앱 묶음의 서명과 속성을 그대로 복사한다.
-  const copy = run('ditto', [builtApp, APP_PATH]);
-  if (copy.status !== 0) fail(t('Could not copy the app.', '앱을 복사하지 못했습니다.'), copy.stderr);
-  fs.rmSync(workDir, { recursive: true, force: true });
+  // 새 앱을 옆에 먼저 복사한 뒤 바꿔 끼운다. 복사가 실패해도 쓰던 앱은 그대로 남는다.
+  const staged = `${APP_PATH}.new`;
+  try {
+    fs.mkdirSync(APP_DIR, { recursive: true });
+    fs.rmSync(staged, { recursive: true, force: true });
+    // ditto는 앱 묶음의 서명과 속성을 그대로 복사한다.
+    const copy = run('ditto', [builtApp, staged]);
+    if (copy.status !== 0) fail(t('Could not copy the app.', '앱을 복사하지 못했습니다.'), copy.stderr);
+    fs.rmSync(APP_PATH, { recursive: true, force: true });
+    fs.renameSync(staged, APP_PATH);
+  } catch (error) {
+    // 예전에 sudo로 설치해 관리자 소유가 된 앱은 지울 수 없다. 어떻게 고치는지 알려 준다.
+    if (error && (error.code === 'EACCES' || error.code === 'EPERM')) {
+      fail(t(`No permission to replace ${APP_PATH}.`, `${APP_PATH}을 바꿀 권한이 없습니다.`),
+        t('It may have been installed with sudo. Remove it once, then run this again:',
+          'sudo로 설치했던 앱일 수 있습니다. 한 번 지운 뒤 다시 실행하세요:') + `\n  ${bold(`sudo rm -rf "${APP_PATH}"`)}`);
+    }
+    throw error;
+  }
+  // 임시 폴더를 못 지워도 설치는 끝난 것이라 멈추지 않는다.
+  removeQuietly(workDir);
 
   step(t('Launching GitBell', 'GitBell 실행'));
   run('open', [APP_PATH]);
@@ -189,6 +218,9 @@ function uninstall(purge) {
     fs.rmSync(DATA_DIR, { recursive: true, force: true });
     run('defaults', ['delete', BUNDLE_ID]);
     run('security', ['delete-generic-password', '-s', BUNDLE_ID, '-a', 'github-token']);
+    // 0.5.2까지는 GitHub API 응답(비공개 저장소 본문 포함)이 이 캐시에 남았다. 함께 지운다.
+    removeQuietly(path.join(os.homedir(), 'Library', 'Caches', BUNDLE_ID));
+    removeQuietly(path.join(os.homedir(), 'Library', 'HTTPStorages', BUNDLE_ID));
     step(t('Removed saved data, settings and the Keychain token', '저장된 기록, 설정, 키체인 토큰을 지웠습니다'));
   } else {
     console.log(dim(t('  Kept your settings. Add --purge to remove them too.', '  설정은 남겨 두었습니다. 함께 지우려면 --purge를 붙이세요.')));
@@ -348,7 +380,7 @@ ${[
     [`${RUN}@latest`, t('update to the latest version', '최신 버전으로 업데이트')],
     [`${RUN} uninstall`, t('remove the app', '앱 지우기')],
     [`${RUN} uninstall --purge`, t('remove the app, settings and token', '앱·설정·토큰 모두 지우기')],
-  ].map(([command, text]) => `  ${bold(command.padEnd(46))}${text}`).join('\n')}
+  ].map(([command, text]) => `  ${bold(command.padEnd(32))}${text}`).join('\n')}
 `);
 }
 

@@ -10,5 +10,5 @@ contextBridge.exposeInMainWorld('gitbell', {
   sendTrayImage: (images) => ipcRenderer.send('tray-image', images),
   onView: (callback) => ipcRenderer.on('view', (_event, view) => callback(view)),
   onDrawTray: (callback) => ipcRenderer.on('draw-tray', (_event, request) => callback(request)),
-  onShown: (callback) => ipcRenderer.on('shown', (_event, maxHeight) => callback(maxHeight)),
+  onShown: (callback) => ipcRenderer.on('shown', (_event, maxHeight, options) => callback(maxHeight, options || {})),
 });

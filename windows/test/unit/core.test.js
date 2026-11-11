@@ -109,10 +109,13 @@ test('WatchState: 다음 실행부터 다른 사람 활동을 한 번만 알린�
   assert.deepEqual(again, [], '같은 항목은 다시 알리지 않는다');
 });
 
-test('WatchState: 내 활동 포함', () => {
+test('WatchState: 내 활동 포함 — 목록에는 읽음으로 넣고 알리지 않는다', () => {
   const state = laterState();
   const notified = WatchState.apply(state, build(), { now, includeOwn: true }).map((e) => e.id);
-  assert.ok(notified.includes(id('pr-merged:32')));
+  const merged = state.history.find((e) => e.id === id('pr-merged:32'));
+  assert.ok(merged, '내 활동도 목록에는 보인다');
+  assert.equal(merged.isUnread, false, '내가 한 일은 안 읽음이 아니다');
+  assert.ok(!notified.includes(id('pr-merged:32')), '내가 한 일을 나에게 알리지 않는다');
 });
 
 test('WatchState: 본 항목은 만료되고 기록은 상한을 넘지 않는다', () => {
@@ -214,7 +217,9 @@ test('Poller: 다음 실행은 커밋 제목을 채운 push를 알린다', async
 test('Poller: since는 밀리초 없는 ISO 시각으로 보낸다', async () => {
   const fake = api(recent);
   await Poller.refresh(fake, laterState(), { now, includeOwn: false });
-  assert.ok(fake.calls.includes('notifications?all=true&since=2026-11-09T04:50:00Z&per_page=50'), fake.calls.join('\n'));
+  // 댓글은 10분 단위, 알림함은 1시간 단위로 맞춘 since를 쓴다(같은 주소가 반복돼 304를 받도록).
+  assert.ok(fake.calls.some((call) => call.includes('issues/comments?since=2026-11-09T04:50:00Z')), fake.calls.join('\n'));
+  assert.ok(fake.calls.includes('notifications?all=true&since=2026-11-09T04:00:00Z&per_page=50'), fake.calls.join('\n'));
 });
 
 test('Poller: compare가 실패하면 마지막 커밋 제목만 읽는다', async () => {
