@@ -220,3 +220,140 @@ test('데모 패널: 열지 않고 읽음 표시·묶음 읽음·되돌리기', 
   assert.equal(await badge(), '2');
   assert.deepEqual(errors, []);
 });
+
+test('데모 패널: 새 항목이 쌓여도 보던 자리를 지키고, 다시 열면 맨 위부터', async (t) => {
+  const { app, window, errors } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  // 목록이 스크롤될 만큼 길도록 창 높이를 줄인다.
+  await window.evaluate(() => document.documentElement.style.setProperty('--max-height', '320px'));
+  const scrollTop = () => window.evaluate(() => document.querySelector('#list').scrollTop);
+  // 새 항목이 맨 위에 쌓인 것처럼 화면 자료를 바꿔 다시 그린다(panel.js의 view·render).
+  const pushNewEvent = (n) => window.evaluate((n) => {
+    const [first, ...rest] = view.sections;
+    const event = { ...first.events[0], id: `new-${n}`, title: `New activity ${n}` };
+    view = { ...view, sections: [{ ...first, events: [event, ...first.events] }, ...rest] };
+    render();
+  }, n);
+
+  // 맨 위에 있으면 새 항목이 바로 보인다.
+  assert.equal(await scrollTop(), 0);
+  await pushNewEvent(1);
+  assert.equal(await scrollTop(), 0);
+  assert.equal(await window.locator('.row-item').first().getAttribute('data-event'), 'new-1');
+
+  // 내려서 보던 중이면 보던 항목이 같은 자리에 머문다(새 항목에 밀려 내려가지 않는다).
+  await window.evaluate(() => { document.querySelector('#list').scrollTop = 150; });
+  const visibleRow = () => window.evaluate(() => {
+    const list = document.querySelector('#list');
+    const top = list.getBoundingClientRect().top;
+    const row = [...list.querySelectorAll('.row-item')].find((item) => item.getBoundingClientRect().bottom > top);
+    return { id: row.dataset.event, offset: Math.round(row.getBoundingClientRect().top - top) };
+  });
+  const before = await visibleRow();
+  assert.ok(await scrollTop() > 0, '목록이 스크롤될 만큼 길다');
+  await pushNewEvent(2);
+  assert.deepEqual(await visibleRow(), before);
+
+  // 패널을 숨겼다가 다시 열면 맨 위(가장 새 항목)부터 보인다.
+  await app.evaluate(({ BrowserWindow }) => {
+    const panel = BrowserWindow.getAllWindows()[0];
+    panel.hide();
+    panel.webContents.send('shown', 600, {});
+  });
+  await window.waitForFunction(() => document.querySelector('#list').scrollTop === 0);
+  assert.deepEqual(errors, []);
+});
+
+test('데모 패널: 숨은 동안에는 다시 그리지 않고, 열 때 바뀐 자료를 보인다', async (t) => {
+  const { app, window, errors } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  const unreadOnly = () => window.evaluate(() => view.query.unreadOnly);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].hide());
+  // 숨은 동안 필터가 바뀌어도(예: 다른 곳에서 바꾼 설정) 화면 자료를 보내지 않는다.
+  await window.evaluate(() => window.gitbell.action('setQuery', { unreadOnly: true }));
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  assert.equal(await unreadOnly(), false, '숨은 패널에는 보내지 않는다');
+  // 다시 열면(두 번째 실행 = 트레이 아이콘을 누른 것과 같은 동작) 바뀐 자료가 바로 보인다.
+  await app.evaluate(({ app }) => app.emit('second-instance', {}, ['GitBell.exe'], '.'));
+  await window.waitForFunction(() => view.query.unreadOnly === true);
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].isVisible()), true);
+  assert.deepEqual(errors, []);
+});
+
+test('데모 패널: Ctrl+F 뒤 바로 친 글자가 검색칸에 들어간다', async (t) => {
+  const { app, window, errors } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  // 예전에는 검색칸이 보이기 전에 초점을 주어 실패해서, 바로 친 글자가 사라졌다.
+  await window.keyboard.press('Control+f');
+  await window.keyboard.type('contrast');
+  await window.waitForFunction(() => document.querySelector('#searchInput').value === 'contrast');
+  await window.waitForFunction(() => document.querySelectorAll('.row-item').length === 2);
+  assert.deepEqual(errors, []);
+});
+
+test('데모 패널: 트레이 배지가 99+여도 아이콘 밖으로 잘리지 않는다', async (t) => {
+  const { app, window } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  // 32px 아이콘의 맨 왼쪽 열은 비어 있어야 한다(배지가 넘치면 빨간 픽셀이 닿는다).
+  const leftColumnAlpha = await window.evaluate(() => {
+    const canvas = document.querySelector('#trayCanvas');
+    drawTrayIcon(canvas, 32, { unread: 128, showsCount: true, hasProblem: false, dark: false });
+    const pixels = canvas.getContext('2d').getImageData(0, 0, 1, 20).data;
+    return Math.max(...pixels.filter((_, index) => index % 4 === 3));
+  });
+  assert.equal(leftColumnAlpha, 0);
+});
+
+test('데모 패널: 키보드 초점은 동작 뒤에도 사라지지 않는다', async (t) => {
+  const { app, window, errors } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  const focused = () => window.evaluate(() => {
+    const element = document.activeElement;
+    // 줄은 화면 읽기용 이름이 길어서 줄 id로 가린다.
+    return element === document.body ? 'body' : (element.dataset.event || element.getAttribute('aria-label')
+      || element.dataset.ui || element.id || element.textContent.trim().slice(0, 20));
+  });
+  const settle = () => window.waitForTimeout(150);
+
+  // 설정을 열면 '뒤로'로, Esc로 닫으면 위쪽 '설정' 단추로 간다.
+  await window.locator('.row-item').first().focus();
+  await window.keyboard.press('Control+,'); await settle();
+  assert.equal(await focused(), 'Back');
+  await window.keyboard.press('Escape'); await settle();
+  assert.match(await focused(), /^Settings/);
+
+  // 검색칸을 Esc로 닫으면 검색 단추로 간다.
+  await window.keyboard.press('Control+f'); await settle();
+  await window.keyboard.press('Escape'); await settle();
+  assert.match(await focused(), /^Search/);
+
+  // 묶음 '읽음 표시'를 키보드로 누르면 단추가 사라져도 그 묶음의 첫 줄로 간다.
+  await window.locator('.section-header').first().getByRole('button', { name: 'Mark as read' }).focus();
+  await window.keyboard.press('Enter'); await settle();
+  assert.equal(await focused(), await window.locator('.row-item').first().getAttribute('data-event'));
+
+  // '되돌리기'를 누르면 띠가 사라져도 초점은 목록에 남는다.
+  await window.locator('.undo-bar button').focus();
+  await window.keyboard.press('Enter'); await settle();
+  assert.notEqual(await focused(), 'body');
+  assert.deepEqual(errors, []);
+});
+
+test('데모 패널: 누르고 떼는 사이에 화면이 다시 그려져도 클릭이 사라지지 않는다', async (t) => {
+  const { app, window, errors } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  const box = await window.getByRole('button', { name: 'Unread', exact: true }).boundingBox();
+  await window.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await window.mouse.down();
+  // 확인 결과가 도착한 것처럼 화면을 다시 그린다(누른 버튼이 새 버튼으로 바뀐다).
+  await window.evaluate(() => render());
+  await window.mouse.up();
+  await window.waitForFunction(() => view.query.unreadOnly === true);
+  assert.deepEqual(errors, []);
+});

@@ -54,15 +54,23 @@ struct EventRow: View {
                 }
                 .buttonStyle(.plain)
                 .help(L10n.string("Mark as read"))
-                .padding(.trailing, 9)
+                // 가운데가 ● 자리(오른쪽 14pt + 점 반지름)와 같게 둔다. 그래야 마우스를 올려도 옆으로 튀지 않는다.
+                .padding(.trailing, 6.5)
                 .padding(.bottom, 5)
             }
         }
         // 단추 위에 있어도 줄에 마우스가 있는 것으로 보도록 overlay 뒤에 단다.
         .onHover { hovering = $0 }
         .help(L10n.title(event))
-        // VoiceOver에서도 열지 않고 읽음으로 바꿀 수 있게 한다.
-        .accessibilityAction(named: Text("Mark as read")) { if event.isUnread { markRead?() } }
+        // VoiceOver는 제목부터, 무슨 일·누가·어디서·언제 순서로 읽는다('·' 같은 꾸밈 글자는 읽지 않는다).
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        let what = [L10n.kindLabel(event), L10n.displayName(event.actor)].filter { !$0.isEmpty }.joined(separator: ", ")
+        let place = [showsRepository ? event.repoName : "", L10n.target(event)].filter { !$0.isEmpty }.joined(separator: " ")
+        return [L10n.title(event), what, place, L10n.relative(event.time), event.isUnread ? L10n.string("Unread") : ""]
+            .filter { !$0.isEmpty }.joined(separator: ". ")
     }
 
     /// 저장소 이름은 가운데를 줄여 앞뒤가 보이게 하고, 시간은 항상 다 보인다.
@@ -143,20 +151,79 @@ private struct KindBadge: View {
 
 private struct Avatar: View {
     let url: URL?
+    @State private var image: NSImage?
+
+    init(url: URL?) {
+        self.url = url
+        // 이미 받은 이미지는 첫 화면부터 바로 그린다(회색 원이 잠깐 보이지 않게).
+        _image = State(initialValue: url.flatMap { AvatarCache.shared.cached($0) })
+    }
 
     var body: some View {
-        AsyncImage(url: url.map(sized)) { image in
-            image.resizable().scaledToFill()
-        } placeholder: {
-            Circle().fill(Color.secondary.opacity(0.25))
+        Group {
+            if let image {
+                Image(nsImage: image).resizable().scaledToFill()
+            } else {
+                Circle().fill(Color.secondary.opacity(0.25))
+            }
         }
         .frame(width: 14, height: 14)
         .clipShape(Circle())
         .accessibilityHidden(true)
+        .task(id: url) {
+            guard let url else { image = nil; return }
+            if let cached = AvatarCache.shared.cached(url) { image = cached; return }
+            image = nil
+            image = await AvatarCache.shared.image(for: url)
+        }
+    }
+}
+
+/// 아바타 이미지를 메모리에 모아 둔다.
+/// AsyncImage는 따로 모아 두지 않아, 목록을 스크롤해 줄이 다시 그려질 때마다 회색 원부터 보였다가 다시 받았다.
+/// 같은 사람이 여러 줄에 나와도 한 번만 받는다(받는 중인 요청도 함께 쓴다).
+@MainActor
+final class AvatarCache {
+    static let shared = AvatarCache()
+    private let images = NSCache<NSURL, NSImage>()
+    /// 받는 중인 요청. 이미지가 아니라 받은 바이트를 넘긴다(NSImage는 macOS 13에서 스레드 사이로 넘길 수 없다).
+    private var loading: [URL: Task<Data?, Never>] = [:]
+
+    private init() {
+        // 40px 이미지라 한 장이 몇 KB다. 기록은 150개까지라 이 정도면 모두 들어간다.
+        images.countLimit = 200
+    }
+
+    func cached(_ url: URL) -> NSImage? {
+        images.object(forKey: Self.sized(url) as NSURL)
+    }
+
+    func image(for url: URL) async -> NSImage? {
+        let sized = Self.sized(url)
+        if let cached = images.object(forKey: sized as NSURL) { return cached }
+        let task: Task<Data?, Never>
+        if let running = loading[sized] {
+            task = running
+        } else {
+            task = Task.detached {
+                var request = URLRequest(url: sized, timeoutInterval: 15)
+                request.setValue("GitBell", forHTTPHeaderField: "User-Agent")
+                guard let (data, response) = try? await URLSession.shared.data(for: request),
+                      (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+                return data
+            }
+            loading[sized] = task
+        }
+        let data = await task.value
+        loading[sized] = nil
+        if let cached = images.object(forKey: sized as NSURL) { return cached }
+        guard let data, let image = NSImage(data: data) else { return nil }
+        images.setObject(image, forKey: sized as NSURL)
+        return image
     }
 
     /// GitHub 아바타 주소에 크기를 붙여 작은 이미지만 받는다.
-    private func sized(_ url: URL) -> URL {
+    private static func sized(_ url: URL) -> URL {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
         var items = components?.queryItems ?? []
         items.append(URLQueryItem(name: "s", value: "40"))

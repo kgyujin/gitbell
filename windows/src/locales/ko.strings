@@ -7,7 +7,6 @@
 "Settings (Ctrl+,)" = "설정 (Ctrl+,)";
 
 /* 트레이 */
-"%lld unread" = "안 읽음 %lld개";
 "Open GitBell" = "GitBell 열기";
 "Show unread count on the tray icon" = "트레이 아이콘에 안 읽은 수 표시";
 
@@ -18,7 +17,6 @@
 /* 연결 */
 "Run this in a terminal, then check again." = "터미널에서 아래 명령을 실행한 뒤 '다시 확인'을 누르세요.";
 "Your token is encrypted for your Windows account and stored only on this PC." = "토큰은 내 Windows 계정으로 암호화되어 이 PC에만 저장됩니다.";
-"Couldn't save the token. Try again." = "토큰을 저장하지 못했습니다. 다시 시도하세요.";
 "Copied — paste it in a terminal" = "복사됨 — 터미널에 붙여넣으세요";
 
 /* 제거 */
@@ -28,3 +26,7 @@
 "Also delete settings, history and the saved token" = "설정, 기록, 저장한 토큰도 지우기";
 "Uninstall" = "제거";
 "Cancel" = "취소";
+
+/* 네트워크 오류(Node fetch는 영어로만 알려 줘서 흔한 경우를 번역한다) */
+"The request timed out." = "요청 시간이 지났습니다.";
+"You appear to be offline." = "인터넷에 연결되어 있지 않은 것 같습니다.";

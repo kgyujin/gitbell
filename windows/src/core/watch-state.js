@@ -19,18 +19,43 @@ const DEFAULT_CONFIG = Object.freeze({
   /** 본 항목 id를 기억하는 기간. */
   seenRetention: 3 * 24 * 3600 * 1000,
   historyLimit: 150,
-  /** 저장소를 동시에 읽는 수. 너무 높으면 GitHub 2차 한도에 걸린다. */
+  /** 저장소(그리고 한 저장소 안의 PR 리뷰·push 커밋 제목)를 동시에 읽는 수. 너무 높으면 GitHub 2차 한도에 걸린다. */
   maxConcurrentRepos: 4,
+  /**
+   * since를 이 단위(10분)로 내려 맞춘다. 1~2분마다 확인해도 'since=' 주소가 한동안 같아져서
+   * 조건부 요청(ETag)으로 304를 받을 수 있다(304는 API 한도에 세지 않는다). 더 읽는 앞부분은 본 항목으로 걸러진다.
+   */
+  sinceGranularity: 10 * 60 * 1000,
+  /**
+   * 바뀐 신호(새 push, 알림함 소식)가 없는 저장소를 다시 읽는 간격. 신호가 있으면 바로 읽는다.
+   * 알림함에 오지 않는 활동(구독하지 않은 저장소의 댓글 등)은 이 간격 안에 잡힌다.
+   */
+  quietRecheck: 15 * 60 * 1000,
+  /** API 한도가 이만큼 남지 않으면 미뤄도 되는 일(조용한 저장소 다시 읽기, push 커밋 제목)을 하지 않는다. */
+  lowBudget: 300,
 });
 
+/**
+ * retrySince: 지난 확인 때 읽지 못한 저장소와, 다음에 거기서부터 다시 읽을 시각(ISO).
+ * 일부 저장소가 실패해도 lastChecked는 앞으로 가므로, 이 값이 없으면 그 저장소의 그 사이 활동이 빠진다.
+ */
+/**
+ * lastRead: 저장소마다 마지막으로 다 읽은 시각(ISO). 다음에 거기서부터 읽고, 바뀐 신호가 없으면 quietRecheck가 지날 때까지 읽지 않는다.
+ */
 function createState() {
-  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [] };
+  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {}, lastRead: {} };
 }
 
-/** 형식이 다르거나 망가진 상태면 로그인 이름만 남기고 비운다. */
+/** 형식이 다르거나 망가진 상태면 로그인 이름만 남기고 비운다. 시각이 망가진 값은 버린다(확인마다 오류로 멈추지 않게). */
 function migrated(state) {
   if (state && state.version === CURRENT_VERSION && Array.isArray(state.history)) {
-    return { ...createState(), ...state };
+    const valid = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value));
+    const merged = { ...createState(), ...state };
+    if (merged.lastChecked != null && !valid(merged.lastChecked)) merged.lastChecked = null;
+    merged.history = merged.history.filter((event) => event && valid(event.time));
+    merged.retrySince = Object.fromEntries(Object.entries(merged.retrySince || {}).filter(([, value]) => valid(value)));
+    merged.lastRead = Object.fromEntries(Object.entries(merged.lastRead || {}).filter(([, value]) => valid(value)));
+    return merged;
   }
   const fresh = createState();
   if (state && typeof state.me === 'string') fresh.me = state.me;
@@ -51,8 +76,12 @@ const sortNewestFirst = (a, b) => time(b.time) - time(a.time);
 function apply(state, events, { now, includeOwn, config = DEFAULT_CONFIG }) {
   const isFirstRun = state.lastChecked == null;
   const toNotify = [];
+  // 이미 기록에 있거나, 이름이 바뀐 저장소에서 같은 GitHub 항목(댓글·리뷰·활동 id)을 본 적 있으면 다시 넣지 않는다.
+  const inHistory = new Set(state.history.map((e) => e.id));
+  const seenGlobal = new Set(Object.keys(state.seen).map(globalKey).filter(Boolean));
   for (const original of events) {
-    if (state.seen[original.id] != null) {
+    const key = globalKey(original.id);
+    if (state.seen[original.id] != null || inHistory.has(original.id) || (key && seenGlobal.has(key))) {
       // 이미 본 항목이라도 예전 기록에 없던 PR 작성자 정보는 채운다.
       if (original.prAuthor) {
         const existing = state.history.find((e) => e.id === original.id && e.prAuthor == null);
@@ -61,19 +90,57 @@ function apply(state, events, { now, includeOwn, config = DEFAULT_CONFIG }) {
       continue;
     }
     state.seen[original.id] = original.time;
-    if (!includeOwn && state.me !== '' && original.actor === state.me) continue;
-    const event = { ...original, isUnread: !isFirstRun };
+    const own = isOwn(original, state.me);
+    if (!includeOwn && own) continue;
+    // includeOwn이어도 내 활동은 읽음으로 넣고 알리지 않는다(내가 한 일을 나에게 알릴 까닭이 없다).
+    const event = { ...original, isUnread: !isFirstRun && !own };
     state.history.push(event);
-    if (!isFirstRun) toNotify.push(event);
+    if (event.isUnread) toNotify.push(event);
   }
-  const cutoff = time(now) - config.seenRetention;
+  // 시계가 잠깐 앞으로 뛰어도(며칠 뒤) 본 항목을 지우지 않게, 지난 확인 시각과 지금 중 이른 쪽을 기준으로 지운다.
+  const reference = state.lastChecked ? Math.min(time(state.lastChecked), time(now)) : time(now);
+  const cutoff = reference - config.seenRetention;
   for (const [id, seenAt] of Object.entries(state.seen)) {
     if (!(time(seenAt) >= cutoff)) delete state.seen[id];
   }
   state.history.sort(sortNewestFirst);
-  if (state.history.length > config.historyLimit) state.history.length = config.historyLimit;
+  trim(state, config.historyLimit);
   state.lastChecked = now;
-  return toNotify;
+  // 기록 상한으로 바로 빠진 항목은 알리지 않는다(눌러도 목록에서 찾을 수 없는 알림이 되지 않게).
+  const kept = new Set(state.history.map((e) => e.id));
+  return toNotify.filter((e) => kept.has(e.id));
+}
+
+/** 저장소 이름이 바뀌어도 같은 항목으로 알아볼 수 있는 GitHub 전역 id(댓글·리뷰·활동). PR 번호는 저장소마다 달라 넣지 않는다. */
+function globalKey(id) {
+  const hash = id.indexOf('#');
+  if (hash < 0) return null;
+  const suffix = id.slice(hash + 1);
+  return /^(ic|rc|review|act):/.test(suffix) ? suffix : null;
+}
+
+/**
+ * 내가 한 활동인지(WatchState.isOwn과 같은 규칙). PR 닫힘은 목록 API가 닫은 사람을 알려 주지 않는데,
+ * 내 PR이 닫힌 것은 대개 내가 닫은 것이라 내 활동으로 본다(머지는 다른 사람이 하는 일이 많아 그렇게 보지 않는다).
+ */
+function isOwn(event, me) {
+  if (!me) return false;
+  if (event.actor === me) return true;
+  return !event.actor && event.kind === 'prClosed' && event.prAuthor === me;
+}
+
+/** 기록을 limit개로 줄인다. 가장 오래된 읽은 항목부터 버리고, 그래도 넘치면 오래된 안 읽은 항목을 버린다. */
+function trim(state, limit) {
+  let excess = state.history.length - limit;
+  if (excess <= 0) return;
+  const keep = state.history.map(() => true);
+  for (let index = state.history.length - 1; index >= 0 && excess > 0; index -= 1) {
+    if (!state.history[index].isUnread) { keep[index] = false; excess -= 1; }
+  }
+  for (let index = state.history.length - 1; index >= 0 && excess > 0; index -= 1) {
+    if (keep[index]) { keep[index] = false; excess -= 1; }
+  }
+  state.history = state.history.filter((_, index) => keep[index]);
 }
 
 /** id가 없으면 모두 읽음으로 바꾼다. */
@@ -167,13 +234,41 @@ function selectRepos(repos, notifications, { since, now, config = DEFAULT_CONFIG
   return [...selected].sort();
 }
 
+/**
+ * 이번 확인에서 읽을 저장소를 고른다(RepoSelector.plan과 같은 규칙).
+ * - 바로 읽음: 마지막으로 읽은 뒤 push가 있었거나 알림함 소식이 온 저장소, 지난번에 실패한 저장소, 처음 보는 활동 저장소.
+ * - 조금 뒤 읽음: 최근 push가 있었지만(activeWindow) 신호가 없는 저장소는 quietRecheck마다 한 번.
+ * - 알림함을 읽을 수 없으면(notifications가 null) 조용한 저장소도 매번 읽고, API 한도가 넉넉하지 않으면 미룬다.
+ */
+function planRepos(repos, notifications, { lastRead = {}, retry = [], since, now, lowBudget = false, readAll = false, config = DEFAULT_CONFIG }) {
+  const activeSince = time(now) - config.activeWindow;
+  const selected = new Set(retry);
+  for (const repo of repos) {
+    if (repo.archived === true || repo.pushed_at == null || time(repo.pushed_at) < activeSince) continue;
+    const read = lastRead[repo.full_name];
+    if (!read) { selected.add(repo.full_name); continue; }
+    const changed = time(repo.pushed_at) > time(read) - config.overlap;
+    const due = notifications == null || time(now) - time(read) >= config.quietRecheck;
+    // readAll: 사용자가 직접 새로고침했으면 조용한 저장소도 모두 지금 읽는다.
+    if (changed || readAll || (due && !lowBudget)) selected.add(repo.full_name);
+  }
+  for (const thread of notifications || []) {
+    const read = lastRead[thread.repository.full_name];
+    const from = read ? time(read) - config.overlap : time(since);
+    if (time(thread.updated_at) >= from) selected.add(thread.repository.full_name);
+  }
+  return [...selected].sort();
+}
+
 module.exports = {
   CURRENT_VERSION,
+  planRepos,
   DEFAULT_CONFIG,
   createState,
   migrated,
   clone,
   apply,
+  isOwn,
   markRead,
   markRepoRead,
   markUnread,

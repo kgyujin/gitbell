@@ -45,8 +45,17 @@ function drawTrayIcon(canvas, size, { unread, showsCount, hasProblem, dark }) {
 
   const text = unread > 99 ? '99+' : String(unread);
   const height = size * 0.62;
-  ctx.font = `bold ${Math.round(height * 0.82)}px "Segoe UI", system-ui, sans-serif`;
-  const width = Math.max(height, ctx.measureText(text).width + height * 0.45);
+  const padding = height * 0.45;
+  let fontSize = Math.round(height * 0.82);
+  const setFont = () => { ctx.font = `bold ${fontSize}px "Segoe UI", system-ui, sans-serif`; };
+  setFont();
+  // '99+'처럼 긴 글자는 그대로 그리면 아이콘 폭을 넘어 왼쪽이 잘린다. 넘치면 글자를 줄여 아이콘 안에(왼쪽에 조금 띄워) 맞춘다.
+  const maxWidth = size - Math.max(1, size * 0.06);
+  if (ctx.measureText(text).width + padding > maxWidth) {
+    fontSize = Math.floor(fontSize * (maxWidth - padding) / ctx.measureText(text).width);
+    setFont();
+  }
+  const width = Math.min(maxWidth, Math.max(height, ctx.measureText(text).width + padding));
   const centerX = size - width / 2;
   const centerY = height / 2;
   badge(ctx, centerX, centerY, width / 2, height / 2);

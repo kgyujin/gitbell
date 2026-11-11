@@ -37,15 +37,33 @@ const attr = (value) => esc(JSON.stringify(value));
 const $ = (selector) => document.querySelector(selector);
 
 /** 'now', '3분 전'처럼 짧은 상대 시간. */
+/** '3분 전' 포매터. 목록의 줄마다 불려서 언어마다 한 번만 만든다(만들기가 줄마다 그리는 것보다 비싸다). */
+let relativeFormatter = null;
+function relativeFormat() {
+  if (!relativeFormatter || relativeFormatter.locale !== locale) {
+    relativeFormatter = { locale, format: new Intl.RelativeTimeFormat(locale, { style: 'short' }) };
+  }
+  return relativeFormatter.format;
+}
+
+/**
+ * '3분 전' 같은 시각. 단위를 넘지 않게 버림으로 센다(95분은 '1시간 전', 59분은 '59분 전').
+ * 7일이 넘으면 주, 5주가 넘으면 달, 12달이 넘으면 해로 센다(macOS판 RelativeDateTimeFormatter와 비슷하게).
+ * 시계가 어긋나 미래 시각이 오면 '방금'으로 본다.
+ */
 function relative(iso) {
-  const seconds = (Date.parse(iso) - Date.now()) / 1000;
-  if (seconds > -60) return t('now');
-  const rtf = new Intl.RelativeTimeFormat(locale, { style: 'short' });
-  const minutes = seconds / 60;
-  if (minutes > -60) return rtf.format(Math.round(minutes), 'minute');
-  const hours = minutes / 60;
-  if (hours > -24) return rtf.format(Math.round(hours), 'hour');
-  return rtf.format(Math.round(hours / 24), 'day');
+  const seconds = (Date.now() - Date.parse(iso)) / 1000;
+  if (!(seconds >= 60)) return t('now');
+  const rtf = relativeFormat();
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return rtf.format(-minutes, 'minute');
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return rtf.format(-hours, 'hour');
+  const days = Math.floor(hours / 24);
+  if (days < 7) return rtf.format(-days, 'day');
+  if (days < 35) return rtf.format(-Math.floor(days / 7), 'week');
+  if (days < 365) return rtf.format(-Math.floor(days / 30), 'month');
+  return rtf.format(-Math.floor(days / 365), 'year');
 }
 
 /** 긴 저장소 이름은 가운데를 줄인다. */
@@ -67,7 +85,9 @@ function iconButton(symbol, title, attrs, { active = false, spinning = false } =
 // MARK: - 위쪽
 
 function renderHeader() {
-  const unread = view.unreadCount > 0 ? `<span class="count-badge">${view.unreadCount}</span>` : '';
+  // 숫자만 읽히면 무슨 수인지 몰라, 화면 읽기에는 '안 읽음 3개'로 읽힌다.
+  const unread = view.unreadCount > 0
+    ? `<span class="count-badge" aria-hidden="true">${view.unreadCount}</span><span class="sr-only">${esc(format('%lld unread', view.unreadCount))}</span>` : '';
   $('#header').innerHTML = `
     <span class="brand">${icon('bell', 'brand-icon')}<strong>GitBell</strong>${unread}</span>
     <span class="spacer"></span>
@@ -85,27 +105,35 @@ function renderSearch() {
   $('#searchClear').hidden = input.value === '';
 }
 
+/** symbol: 'dot'(안 읽음 점), 'person'(내 PR), 그 밖에는 icons.js의 아이콘 이름. */
 function chip(title, selected, attrs, { symbol = '', small = false } = {}) {
-  const dot = symbol ? `<span class="chip-dot${symbol === 'person' ? ' person' : ''}">${symbol === 'person' ? icon('person') : ''}</span>` : '';
+  let dot = '';
+  if (symbol === 'dot' || symbol === 'person') {
+    dot = `<span class="chip-dot${symbol === 'person' ? ' person' : ''}">${symbol === 'person' ? icon('person') : ''}</span>`;
+  } else if (symbol) {
+    dot = icon(symbol, 'chip-icon');
+  }
   return `<button type="button" class="chip${selected ? ' selected' : ''}${small ? ' small' : ''}" aria-pressed="${selected}" ${attrs}>${dot}${esc(title)}</button>`;
 }
 
 function renderFilters() {
   const q = view.query;
-  const categories = [[null, t('All')], ['pullRequests', t('PRs')], ['reviews', t('Reviews')], ['commits', t('Commits')]];
+  // 종류 칩에도 목록·알림 설정과 같은 아이콘을 붙여 한눈에 알아보게 한다('전체'는 글자만).
+  const categories = [[null, t('All'), ''], ['pullRequests', t('PRs'), 'pullRequest'], ['reviews', t('Reviews'), 'eye'],
+    ['commits', t('Commits'), 'arrowUp']];
   return `
     <div class="filters">
       <div class="row">
-        ${categories.map(([category, title]) => chip(title, q.category === category, actionAttrs('setQuery', { category }))).join('')}
+        ${categories.map(([category, title, symbol]) => chip(title, q.category === category, actionAttrs('setQuery', { category }), { symbol })).join('')}
         <span class="spacer"></span>
         ${chip(t('Mine'), q.mineOnly, `${actionAttrs('setQuery', { mineOnly: !q.mineOnly })} title="${esc(t("Show only others' activity on pull requests you opened. Notifications aren't affected."))}"`, { symbol: 'person', small: true })}
         ${chip(t('Unread'), q.unreadOnly, actionAttrs('setQuery', { unreadOnly: !q.unreadOnly }), { symbol: 'dot', small: true })}
       </div>
       <div class="row small">
-        <button type="button" class="menu-chip${q.repo ? ' active' : ''}" data-ui="repoMenu" aria-haspopup="menu" aria-expanded="${openMenuName() === 'repoMenu'}" title="${esc(q.repo || view.repositoryTitle)}">
+        <button type="button" class="menu-chip${q.repo ? ' active' : ''}" id="repoMenuButton" data-ui="repoMenu" aria-haspopup="menu" aria-expanded="${openMenuName() === 'repoMenu'}" aria-label="${esc(format('Repository: %@', q.repo || view.repositoryTitle))}" title="${esc(q.repo || view.repositoryTitle)}">
           ${icon('folder')}<span>${esc(shortened(view.repositoryTitle))}</span>${icon('chevronDown', 'chevron')}
         </button>
-        <button type="button" class="menu-chip${q.sort !== 'newest' ? ' active' : ''}" data-ui="sortMenu" aria-haspopup="menu" aria-expanded="${openMenuName() === 'sortMenu'}">
+        <button type="button" class="menu-chip${q.sort !== 'newest' ? ' active' : ''}" id="sortMenuButton" data-ui="sortMenu" aria-haspopup="menu" aria-expanded="${openMenuName() === 'sortMenu'}" aria-label="${esc(format('Sort: %@', view.sortTitle))}">
           ${icon('sort')}<span>${esc(view.sortTitle)}</span>${icon('chevronDown', 'chevron')}
         </button>
         <span class="spacer"></span>
@@ -118,8 +146,8 @@ function renderFilters() {
 function renderProblem() {
   if (!view.problemMessage) return '';
   const settings = view.problemOpensSettings
-    ? `<button type="button" class="link problem-action" ${actionAttrs('setShowingSettings', true)}>${esc(t('Open Settings'))}</button>` : '';
-  return `<div class="problem" role="status">${icon('warning', 'tint-orange')}<span>${esc(view.problemMessage)}</span>${settings}</div>`;
+    ? `<button type="button" class="link problem-action with-icon" ${actionAttrs('setShowingSettings', true)}>${icon('settings')}${esc(t('Open Settings'))}</button>` : '';
+  return `<div class="problem">${icon('warning', 'tint-orange')}<span>${esc(view.problemMessage)}</span>${settings}</div>`;
 }
 
 // MARK: - 목록
@@ -137,14 +165,17 @@ function renderList() {
   return `<div class="list" id="list">${view.sections.map(renderSection).join('')}</div>`;
 }
 
+/** 묶음 머리줄 아이콘: 날짜는 달력, 안 읽음은 점 원, 읽음은 체크 원. 저장소는 폴더(아래에서 따로 그린다). */
+const SECTION_ICON = { day: 'calendar', unread: 'circleDot', read: 'checkCircle' };
+
 function renderSection(section) {
   let header;
   if (section.repo) {
     header = `<div class="section-header">${icon('folder', 'secondary')}
-      <button type="button" class="plain" title="${esc(section.repo)}" ${actionAttrs('openLink', `repo:${section.repo}`)}>${esc(section.title)}</button>
-      <span class="tertiary">${section.count}</span><span class="spacer"></span>${sectionMarkRead(section)}</div>`;
+      <span class="section-title" role="heading" aria-level="3"><button type="button" class="plain" title="${esc(section.repo)}" ${actionAttrs('openLink', `repo:${section.repo}`)}>${esc(section.title)}</button></span>
+      <span class="section-count">${section.count}</span><span class="spacer"></span>${sectionMarkRead(section)}</div>`;
   } else {
-    header = `<div class="section-header"><span class="secondary">${esc(section.title)}</span><span class="tertiary">${section.count}</span>
+    header = `<div class="section-header">${icon(SECTION_ICON[section.type] || 'calendar', 'section-icon')}<span class="secondary" role="heading" aria-level="3">${esc(section.title)}</span><span class="section-count">${section.count}</span>
       <span class="spacer"></span>${sectionMarkRead(section)}</div>`;
   }
   return `<section data-section="${esc(section.id)}">${header}${section.events.map(renderRow).join('')}</section>`;
@@ -153,7 +184,7 @@ function renderSection(section) {
 /** 저장소 묶음뿐 아니라 날짜·안 읽음 묶음도 한 번에 읽음으로 바꿀 수 있다(보이는 항목만, 되돌릴 수 있다). */
 function sectionMarkRead(section) {
   if (section.unreadCount === 0) return '';
-  return `<button type="button" class="link" ${actionAttrs('markSectionRead', section.id)}>${esc(t('Mark as read'))}</button>`;
+  return `<button type="button" class="link with-icon" ${actionAttrs('markSectionRead', section.id)}>${icon('checkCircle')}${esc(t('Mark as read'))}</button>`;
 }
 
 function renderRow(event) {
@@ -163,18 +194,23 @@ function renderRow(event) {
     : '<span class="avatar placeholder"></span>';
   const actor = event.actor ? `<span class="tertiary">·</span>${avatar}<span class="actor">${esc(event.actor)}</span>
     ${event.isBot ? `<span class="bot">${esc(t('bot'))}</span>` : ''}` : '';
+  // 화면 읽기에는 제목부터, 무슨 일·누가·어디서 순서로 읽힌다('·' 같은 꾸밈 글자는 읽히지 않는다). 시각은 설명으로 붙인다.
+  const label = [event.title, [event.kindLabel, event.actor].filter(Boolean).join(', '),
+    [event.showsRepository ? event.repoName : '', event.target].filter(Boolean).join(' '),
+    event.isUnread ? t('Unread') : ''].filter(Boolean).join('. ');
+  const timeId = `time-${event.id}`;
   return `
     <div class="row-wrap">
-    <button type="button" class="row-item${event.isUnread ? ' unread' : ''}" data-event="${esc(event.id)}" title="${esc(event.title)}" ${actionAttrs('open', event.id)}>
+    <button type="button" class="row-item${event.isUnread ? ' unread' : ''}" data-event="${esc(event.id)}" aria-label="${esc(label)}" aria-describedby="${esc(timeId)}" ${actionAttrs('open', event.id)}>
       <span class="kind-badge tint-${tint}">${icon(symbol)}</span>
       <span class="row-text">
         <span class="context">
           ${event.showsRepository ? `<span class="repo">${esc(event.repoName)}</span>` : ''}
           ${event.target ? `<span class="target">${esc(event.target)}</span>` : ''}
           <span class="spacer"></span>
-          <span class="time" data-time="${esc(event.time)}">${esc(relative(event.time))}</span>
+          <span class="time" id="${esc(timeId)}" data-time="${esc(event.time)}">${esc(relative(event.time))}</span>
         </span>
-        <span class="title">${esc(event.title)}</span>
+        <span class="title" dir="auto" title="${esc(event.title)}">${esc(event.title)}</span>
         <span class="meta"><span class="kind tint-${tint}">${esc(event.kindLabel)}</span>${actor}
           <span class="spacer"></span>${event.isUnread ? `<span class="unread-dot" role="img" aria-label="${esc(t('Unread'))}"></span>` : ''}</span>
       </span>
@@ -186,20 +222,20 @@ function renderRow(event) {
 /** 여러 항목을 읽음으로 바꾼 직후 잠시 보이는 '되돌리기'(Ctrl+Z). */
 function renderUndo() {
   if (!view.readUndo) return '';
-  return `<div class="undo-bar" role="status">${icon('checkCircle', 'secondary')}<span>${esc(view.readUndo.text)}</span>
-    <span class="spacer"></span><button type="button" class="link strong" ${actionAttrs('undoMarkRead')}>${esc(t('Undo'))}</button></div>`;
+  return `<div class="undo-bar">${icon('checkCircle', 'secondary')}<span>${esc(view.readUndo.text)}</span>
+    <span class="spacer"></span><button type="button" class="link with-icon" ${actionAttrs('undoMarkRead')}>${icon('undo')}${esc(t('Undo'))}</button></div>`;
 }
 
 function renderUpdate() {
   if (!view.availableUpdate) return '';
-  return `<button type="button" class="update" data-ui="copyUpdate" title="npx gitbell@latest">
-    ${icon('download', 'accent')}<strong>${esc(format('GitBell %@ is available', view.availableUpdate))}</strong>
-    <span class="spacer"></span><span class="accent">${esc(copiedUpdate ? t('Copied — paste it in a terminal') : t('Copy update command'))}</span></button>`;
+  return `<button type="button" class="update" data-ui="copyUpdate" title="${esc(view.updateCommand)}">
+    ${icon('download', 'accent')}<span>${esc(format('GitBell %@ is available', view.availableUpdate))}</span>
+    <span class="spacer"></span><span class="accent with-icon">${icon(copiedUpdate ? 'check' : 'copy')}${esc(copiedUpdate ? t('Copied — paste it in a terminal') : t('Copy update command'))}</span></button>`;
 }
 
 function renderFooter() {
-  return `<footer class="footer"><span>${esc(view.checkedText)}</span><span class="spacer"></span>
-    <button type="button" class="link" ${actionAttrs('openLink', 'notifications')}>${esc(t('Open GitHub'))}</button></footer>`;
+  return `<footer class="footer"><span class="with-icon">${icon('clock')}${esc(view.checkedText)}</span><span class="spacer"></span>
+    <button type="button" class="link with-icon" ${actionAttrs('openLink', 'notifications')}>${esc(t('Open GitHub'))}${icon('external')}</button></footer>`;
 }
 
 // MARK: - 처음 연결 안내
@@ -219,7 +255,7 @@ function renderOnboarding() {
         <strong>${esc(t('Or paste a personal access token'))}</strong>
         <div data-slot="token"></div>
       </div></div>
-      <p class="secondary small">${esc(t('Your token is encrypted for your Windows account and stored only on this PC.'))}</p>
+      <p class="secondary small with-icon">${icon('lock')}${esc(t('Your token is encrypted for your Windows account and stored only on this PC.'))}</p>
     </div>`;
 }
 
@@ -228,10 +264,10 @@ const tokenField = (() => {
   const element = document.createElement('div');
   element.className = 'token-field';
   element.innerHTML = `
-    <div class="row"><input id="tokenInput" type="password" placeholder="ghp_…" spellcheck="false" autocomplete="off">
+    <div class="row"><input id="tokenInput" type="password" placeholder="ghp_…" spellcheck="false" autocomplete="off" aria-label="Personal access token">
       <button type="button" class="button" id="tokenSave" disabled></button></div>
     <p class="error" id="tokenError" hidden></p>
-    <button type="button" class="link small" data-action="openLink" data-args='["tokenCreation"]' id="tokenLink"></button>`;
+    <button type="button" class="link small with-icon" data-action="openLink" data-args='["tokenCreation"]' id="tokenLink"></button>`;
   const input = element.querySelector('#tokenInput');
   const save = element.querySelector('#tokenSave');
   const submit = () => {
@@ -251,7 +287,8 @@ function placeTokenField() {
   if (slot) {
     slot.replaceWith(tokenField);
     tokenField.querySelector('#tokenSave').textContent = t('Save');
-    tokenField.querySelector('#tokenLink').textContent = t('Create a token on GitHub (repo, notifications, read:org)');
+    tokenField.querySelector('#tokenInput').setAttribute('aria-label', t('Personal access token'));
+    tokenField.querySelector('#tokenLink').innerHTML = esc(t('Create a token on GitHub (repo, notifications, read:org)')) + icon('external');
     const error = tokenField.querySelector('#tokenError');
     error.hidden = !view.tokenSaveFailed;
     error.textContent = t("Couldn't save the token. Try again.");
@@ -304,14 +341,15 @@ function renderSettings() {
     }).join('')}</div>`);
   notifications.push(`<div class="divider"></div><div class="setting-block small">
     <div class="setting-line">${icon('checkCircle', 'row-icon tint-green')}<span class="secondary">${esc(t('Banner style follows Windows settings'))}</span></div>
-    <div class="row indent"><button type="button" class="link" ${actionAttrs('openNotificationSettings')}>${esc(t('Open Windows settings'))}</button>
+    <div class="row indent"><button type="button" class="link with-icon" ${actionAttrs('openNotificationSettings')}>${esc(t('Open Windows settings'))}${icon('external')}</button>
       <span class="spacer"></span>
       <button type="button" class="pill" ${actionAttrs('sendTestNotification')}>${icon('send')}${esc(t('Send test'))}</button></div></div>`);
 
-  const hidden = s.hiddenRepositories.length
-    ? s.hiddenRepositories.map((repo) => `<div class="hidden-repo"><span>${esc(repo)}</span><span class="spacer"></span>
-        <button type="button" class="link" ${actionAttrs('showRepository', repo)}>${esc(t('Show'))}</button></div>`).join('')
-    : `<p class="secondary small indent">${esc(t('Right-click an item to hide its repository.'))}</p>`;
+  const hidden = s.hiddenRepositories.map((repo) => `<div class="hidden-repo"><span>${esc(repo)}</span><span class="spacer"></span>
+        <button type="button" class="link" ${actionAttrs('showRepository', repo)}>${esc(t('Show'))}</button></div>`).join('');
+  // 다른 설정 줄(switchRow)과 같은 모양: 아이콘 · 제목과 10px 설명 · 오른쪽 값(두 줄 가운데에 맞춘다).
+  const hiddenHint = s.hiddenRepositories.length ? ''
+    : `<span class="subtitle">${esc(t('Right-click an item to hide its repository.'))}</span>`;
   const list = [
     switchRow({ symbol: 'person', title: t('Include my own activity'), on: s.includeOwnActivity, action: 'setIncludeOwnActivity', args: [!s.includeOwnActivity] }),
     '<div class="divider"></div>',
@@ -319,13 +357,14 @@ function renderSettings() {
     '<div class="divider"></div>',
     switchRow({ symbol: 'hash', title: t('Show unread count on the tray icon'), on: s.showsCountInTray, action: 'setShowsCountInTray', args: [!s.showsCountInTray] }),
     '<div class="divider"></div>',
-    `<div class="setting-block"><div class="setting-line">${icon('eyeOff', 'row-icon secondary')}<span>${esc(t('Hidden repositories'))}</span>
-      <span class="spacer"></span><span class="secondary">${s.hiddenRepositories.length}</span></div>${hidden}</div>`,
+    `<div class="setting-block"><div class="setting-line">${icon('eyeOff', 'row-icon secondary')}<span class="row-label"><span>${esc(t('Hidden repositories'))}</span>${hiddenHint}</span>
+      <span class="secondary">${s.hiddenRepositories.length}</span></div>${hidden}</div>`,
   ];
 
   const general = [
-    `<div class="setting-line">${icon('refresh', 'row-icon secondary')}<span>${esc(t('Check every'))}</span><span class="spacer"></span>
-      ${s.refreshChoices.map((minutes) => `<button type="button" class="segment${s.refreshMinutes === minutes ? ' selected' : ''}" aria-pressed="${s.refreshMinutes === minutes}" ${actionAttrs('setRefreshMinutes', minutes)}>${esc(format('%lld min', minutes))}</button>`).join('')}</div>`,
+    `<div class="setting-line">${icon('refresh', 'row-icon secondary')}<span class="nowrap">${esc(t('Check every'))}</span><span class="spacer"></span>
+      <span class="segments" role="radiogroup" aria-label="${esc(t('Check every'))}">
+      ${s.refreshChoices.map((minutes) => `<button type="button" role="radio" class="segment${s.refreshMinutes === minutes ? ' selected' : ''}" aria-checked="${s.refreshMinutes === minutes}" ${actionAttrs('setRefreshMinutes', minutes)}>${esc(format('%lld min', minutes))}</button>`).join('')}</span></div>`,
     '<div class="divider"></div>',
     switchRow({ symbol: 'power', title: t('Open at login'), on: s.launchAtLogin, action: 'setLaunchAtLogin', args: [!s.launchAtLogin] }),
   ];
@@ -340,18 +379,19 @@ function renderSettings() {
     </div>
     <footer class="footer"><span class="secondary">GitBell ${esc(view.version)}</span>
       ${view.availableUpdate ? `<span class="tag">${esc(format('%@ available', view.availableUpdate))}</span>` : ''}
-      <button type="button" class="link" ${actionAttrs('openLink', 'project')}>${esc(t('GitHub'))}</button>
+      <button type="button" class="link with-icon" ${actionAttrs('openLink', 'project')}>${esc(t('GitHub'))}${icon('external')}</button>
       <span class="spacer"></span>
       <button type="button" class="pill" ${actionAttrs('quit')}>${icon('power')}${esc(t('Quit GitBell'))}</button></footer>`;
 }
 
 // MARK: - 고르기 메뉴(저장소·정렬·우클릭)
 
-function optionRow({ title, subtitle = '', detail = '', unread = 0, selected = null, symbol = '', attrs = '' }) {
+function optionRow({ title, subtitle = '', detail = '', unread = 0, selected = null, symbol = '', label = '', attrs = '' }) {
   // 고르는 메뉴(저장소·정렬)는 골라진 것을 화면 읽기 프로그램도 알 수 있게 한다.
   const role = selected == null ? 'role="menuitem"' : `role="menuitemradio" aria-checked="${selected}"`;
-  return `<button type="button" class="option" tabindex="-1" ${role} ${attrs}>
-    <span class="check">${selected ? icon('check') : ''}</span>
+  const name = label ? `aria-label="${esc(label)}"` : '';
+  return `<button type="button" class="option" tabindex="-1" ${role} ${name} ${attrs}>
+    ${selected == null ? '' : `<span class="check">${selected ? icon('check') : ''}</span>`}
     ${symbol ? icon(symbol, 'secondary') : ''}
     <span class="option-text"><span class="${selected ? 'strong' : ''}">${esc(title)}</span>${subtitle ? `<span class="subtitle">${esc(subtitle)}</span>` : ''}</span>
     <span class="spacer"></span>
@@ -365,7 +405,11 @@ const menus = {
     return optionRow({ title: t('All repositories'), detail: total, selected: view.query.repo == null, attrs: actionAttrs('setQuery', { repo: null }) })
       + '<div class="menu-divider"></div><div class="menu-scroll">'
       + view.repositories.map((repo) => optionRow({ title: repo.name, subtitle: repo.repo, detail: repo.count, unread: repo.unreadCount,
-        selected: view.query.repo === repo.repo, attrs: `${actionAttrs('setQuery', { repo: repo.repo })} data-repo-menu="${esc(repo.repo)}"` })).join('')
+        selected: view.query.repo === repo.repo,
+        // 숫자 두 개(안 읽음·전체)만 읽히면 뜻을 몰라 이름표에 풀어 쓴다.
+        label: [repo.name, repo.repo, format('%lld items', repo.count), repo.unreadCount ? format('%lld unread', repo.unreadCount) : '']
+          .filter(Boolean).join(', '),
+        attrs: `${actionAttrs('setQuery', { repo: repo.repo })} data-repo-menu="${esc(repo.repo)}"` })).join('')
       + '</div>';
   },
   sortMenu: () => [['newest', 'clock', 'Newest'], ['byRepository', 'folder', 'By repository'], ['unreadFirst', 'circleDot', 'Unread first']]
@@ -375,17 +419,17 @@ const menus = {
     const event = view.sections.flatMap((section) => section.events).find((e) => e.id === id);
     if (!event) return null;
     return [
-      optionRow({ title: t('Open in browser'), attrs: actionAttrs('open', id) }),
-      optionRow({ title: t('Copy link'), attrs: actionAttrs('copyLink', id) }),
+      optionRow({ title: t('Open in browser'), symbol: 'external', attrs: actionAttrs('open', id) }),
+      optionRow({ title: t('Copy link'), symbol: 'link', attrs: actionAttrs('copyLink', id) }),
       '<div class="menu-divider"></div>',
-      event.isUnread ? optionRow({ title: t('Mark as read'), attrs: actionAttrs('markRead', id) })
-        : optionRow({ title: t('Mark as unread'), attrs: actionAttrs('markUnread', id) }),
-      optionRow({ title: format('Show only %@', event.repoName), attrs: actionAttrs('setQuery', { repo: event.repo }) }),
+      event.isUnread ? optionRow({ title: t('Mark as read'), symbol: 'checkCircle', attrs: actionAttrs('markRead', id) })
+        : optionRow({ title: t('Mark as unread'), symbol: 'circleDot', attrs: actionAttrs('markUnread', id) }),
+      optionRow({ title: format('Show only %@', event.repoName), symbol: 'folder', attrs: actionAttrs('setQuery', { repo: event.repo }) }),
       '<div class="menu-divider"></div>',
-      optionRow({ title: format('Hide %@', event.repoName), attrs: actionAttrs('hideRepository', event.repo) }),
+      optionRow({ title: format('Hide %@', event.repoName), symbol: 'eyeOff', attrs: actionAttrs('hideRepository', event.repo) }),
     ].join('');
   },
-  repoContextMenu: (repo) => optionRow({ title: t('Hide this repository'), attrs: actionAttrs('hideRepository', repo) }),
+  repoContextMenu: (repo) => optionRow({ title: t('Hide this repository'), symbol: 'eyeOff', attrs: actionAttrs('hideRepository', repo) }),
 };
 
 function openMenuName() {
@@ -402,6 +446,10 @@ function openMenu(name, arg, anchor, opener = null) {
   menu.innerHTML = html;
   menu.hidden = false;
   menu.dataset.menu = name;
+  // 저장소·정렬 메뉴는 연 단추의 이름(예: '정렬: 최신순')으로 읽힌다.
+  const labelledBy = { repoMenu: 'repoMenuButton', sortMenu: 'sortMenuButton' }[name];
+  if (labelledBy) menu.setAttribute('aria-labelledby', labelledBy);
+  else menu.removeAttribute('aria-labelledby');
   const width = name === 'repoMenu' ? 280 : name === 'sortMenu' ? 200 : 240;
   menu.style.width = `${width}px`;
   const maxLeft = document.documentElement.clientWidth - width - 8;
@@ -459,35 +507,125 @@ function moveMenuFocus(key) {
  * 화면을 innerHTML로 통째로 다시 그려, 그대로 두면 칩을 Enter로 누를 때마다 초점이 사라졌다.
  * data-ui·data-event는 그대로 찾고, 나머지는 같은 동작(data-action) 버튼 중 몇 번째인지로 찾는다.
  */
+/**
+ * 다시 그리기 전, 키보드 초점이 어디 있었는지 기억한다.
+ * 화면은 다시 그릴 때마다 새 버튼으로 바뀌어 초점이 사라지므로, 같은 버튼(또는 그 자리를 대신할 곳)을 찾아 돌려준다.
+ */
 function focusKey() {
   const element = document.activeElement;
-  if (!element || element === document.body || element.closest('#menu') || element.id) return null;
-  if (element.dataset.ui) return `[data-ui="${CSS.escape(element.dataset.ui)}"]`;
-  // 줄의 '읽음 표시' 단추는 누르면 사라지므로 그 줄로 초점을 옮긴다.
-  if (element.classList.contains('row-read')) {
-    const row = element.parentElement.querySelector('[data-event]');
-    if (row) return `[data-event="${CSS.escape(row.dataset.event)}"]`;
+  if (!element || element === document.body || element.closest('#menu')) return null;
+  const area = element.closest('#settings') ? 'settings' : element.closest('.list') ? 'list' : 'main';
+  const rows = [...document.querySelectorAll('.list .row-item')];
+  const key = { area, section: element.closest('section')?.dataset.section ?? null,
+    rowIndex: rows.indexOf(element.closest('.row-wrap')?.querySelector('.row-item') ?? null) };
+  if (element.id) {
+    key.selector = `#${CSS.escape(element.id)}`;
+  } else if (element.dataset.ui) {
+    key.selector = `[data-ui="${CSS.escape(element.dataset.ui)}"]`;
+  } else if (element.classList.contains('row-read') || element.dataset.event) {
+    // 줄의 '읽음 표시' 단추는 누르면 사라지므로 그 줄로 초점을 옮긴다.
+    const row = element.dataset.event ? element : element.parentElement.querySelector('[data-event]');
+    if (row) key.selector = `[data-event="${CSS.escape(row.dataset.event)}"]`;
+  } else if (element.dataset.action) {
+    key.action = element.dataset.action;
+    key.index = [...document.querySelectorAll(`[data-action="${CSS.escape(key.action)}"]`)].filter(isShown).indexOf(element);
   }
-  if (element.dataset.event) return `[data-event="${CSS.escape(element.dataset.event)}"]`;
-  const action = element.dataset.action;
-  if (!action) return null;
-  const same = [...document.querySelectorAll(`[data-action="${CSS.escape(action)}"]`)];
-  return { action, index: same.indexOf(element) };
+  return key;
+}
+
+/** 화면에 보이는(숨은 화면·[hidden] 안이 아닌) 요소인지. 숨은 버튼에는 초점을 줄 수 없다. */
+function isShown(element) {
+  return element.isConnected && !element.closest('[hidden]') && element.getClientRects().length > 0;
 }
 
 function restoreFocus(key) {
-  if (!key || (document.activeElement && document.activeElement !== document.body)) return;
-  const element = typeof key === 'string'
-    ? document.querySelector(key)
-    : document.querySelectorAll(`[data-action="${CSS.escape(key.action)}"]`)[key.index];
-  if (element) element.focus();
+  // 초점 받은 요소가 방금 숨었으면(설정 화면으로 바뀜 등) 브라우저가 아직 그 요소를 activeElement로 둘 수 있어 함께 본다.
+  const active = document.activeElement;
+  if (!key || (active && active !== document.body && isShown(active))) return;
+  const shown = (selector) => [...document.querySelectorAll(selector)].filter(isShown);
+  let element = null;
+  if (key.selector) element = shown(key.selector)[0];
+  else if (key.action) element = shown(`[data-action="${CSS.escape(key.action)}"]`)[key.index];
+  // 그 버튼이 사라졌으면(읽음 표시 뒤 '모두 읽음', 설정 열기·닫기, 저장소 숨기기 등) 가까운 자리로 옮긴다.
+  if (!element) element = fallbackFocus(key, shown);
+  // 스크롤은 listAnchor가 맞춰 두었으니 초점을 옮기며 목록을 움직이지 않는다.
+  if (element) element.focus({ preventScroll: true });
+}
+
+function fallbackFocus(key, shown) {
+  // 설정을 열었으면 '뒤로', 닫았으면 위쪽의 '설정' 단추로.
+  if (view.showingSettings) return shown('#settings .settings-header button')[0];
+  // 검색칸을 닫았으면 검색 단추로.
+  if (key.selector === '#searchInput') return shown('[data-ui="toggleSearch"]')[0];
+  if (key.area === 'settings') return shown('#header [data-action="setShowingSettings"]')[0];
+  const rows = shown('.list .row-item');
+  if (key.area === 'list' && rows.length) {
+    const inSection = key.section ? shown(`section[data-section="${CSS.escape(key.section)}"] .row-item`)[0] : null;
+    return inSection || rows[Math.min(Math.max(key.rowIndex, 0), rows.length - 1)];
+  }
+  return rows[0] || shown('#header button')[0];
+}
+
+/**
+ * 다시 그리기 전 목록의 스크롤 위치를 기억한다.
+ * 픽셀값만 기억하면 위에 새 항목이 쌓일 때 보던 항목이 아래로 밀린다.
+ * 맨 위였으면 맨 위를(새 항목이 바로 보인다), 아니면 맨 위에 보이던 항목과 그 위치를 기억한다.
+ */
+function listAnchor() {
+  const list = $('#list');
+  if (!list || list.scrollTop <= 2) return null;
+  const top = list.getBoundingClientRect().top;
+  const row = [...list.querySelectorAll('.row-item')].find((item) => item.getBoundingClientRect().bottom > top);
+  return { scrollTop: list.scrollTop, id: row?.dataset.event, offset: row ? row.getBoundingClientRect().top - top : 0 };
+}
+
+function restoreListAnchor(anchor) {
+  const list = $('#list');
+  if (!list || !anchor) return;
+  list.scrollTop = anchor.scrollTop;
+  const row = anchor.id && list.querySelector(`.row-item[data-event="${CSS.escape(anchor.id)}"]`);
+  if (row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - anchor.offset;
+}
+
+/** 종류 칩 줄이 패널 폭을 넘치면 아이콘을 빼고 글자만 남긴다. 한국어는 아이콘까지 들어간다. */
+function fitFilterChips() {
+  const row = document.querySelector('.filters > .row');
+  if (!row) return;
+  row.classList.remove('compact');
+  if (row.scrollWidth > row.clientWidth) row.classList.add('compact');
+}
+
+/** 화면 읽기 프로그램에 마지막으로 알린 상태. 같은 내용을 다시 그릴 때마다 되풀이해 알리지 않는다. */
+let announced = { problem: null, undo: null, copied: false, search: '' };
+let searchAnnounceTimer = null;
+
+/**
+ * 되돌리기·문제·복사처럼 새로 생긴 상태를 #announcer(늘 그 자리에 있는 알림 자리)로 알린다.
+ * 띠 자체에 role=status를 두면 다시 그릴 때마다 새로 생긴 알림 자리라 읽지 않거나 되풀이해 읽는다.
+ */
+function announceChanges() {
+  const messages = [];
+  if (view.problemMessage && view.problemMessage !== announced.problem) messages.push(view.problemMessage);
+  // 같은 문구라도 새로 생긴 되돌리기(stamp가 다름)면 다시 알린다.
+  const undo = view.readUndo ? view.readUndo.stamp : null;
+  if (undo != null && undo !== announced.undo) messages.push(view.readUndo.text);
+  if (copiedUpdate && !announced.copied) messages.push(t('Copied — paste it in a terminal'));
+  const search = view.query.search || '';
+  if (search !== announced.search) {
+    // 검색 결과 수는 글자를 다 친 뒤 한 번만 알린다.
+    clearTimeout(searchAnnounceTimer);
+    if (search.trim()) {
+      searchAnnounceTimer = setTimeout(() => { $('#announcer').textContent = format('%lld items', view.visibleCount); }, 700);
+    }
+  }
+  announced = { problem: view.problemMessage, undo, copied: copiedUpdate, search };
+  if (messages.length) $('#announcer').textContent = messages.join(' ');
 }
 
 function render() {
   if (!view) return;
   const focused = focusKey();
-  const list = $('#list');
-  const scrollTop = list ? list.scrollTop : 0;
+  const anchor = listAnchor();
   const settingsScroll = $('#settingsScroll');
   const settingsTop = settingsScroll ? settingsScroll.scrollTop : 0;
 
@@ -502,11 +640,12 @@ function render() {
     $('#body').innerHTML = view.showsOnboarding
       ? renderProblem() + renderOnboarding()
       : renderFilters() + renderProblem() + renderList() + renderUndo() + renderUpdate() + renderFooter();
-    const newList = $('#list');
-    if (newList) newList.scrollTop = scrollTop;
+    restoreListAnchor(anchor);
+    fitFilterChips();
   }
   placeTokenField();
   restoreFocus(focused);
+  announceChanges();
   if (menuBuilder && !$('#menu').hidden) {
     const html = menuBuilder();
     if (html == null) closeMenu();
@@ -529,8 +668,13 @@ function setMaxHeight(height) {
   if (height > 0) document.documentElement.style.setProperty('--max-height', `${height}px`);
 }
 
-/** 패널을 열어 둔 동안에도 '3분 전' 같은 시간이 바뀌게 한다. */
-function refreshTimes() {
+/**
+ * 패널을 열어 둔 동안에도 '3분 전' 같은 시간이 바뀌게 한다. 숨은 패널은 고치지 않고 열 때 맞춘다(onShown).
+ * force: 패널을 막 열었을 때. 그 순간에는 document.hidden이 아직 true일 수 있다.
+ */
+function refreshTimes(force = false) {
+  // 숨은 패널의 시각은 고치지 않는다. 열 때 다시 맞춘다(onShown).
+  if (!force && document.hidden) return;
   for (const element of document.querySelectorAll('[data-time]')) element.textContent = relative(element.dataset.time);
 }
 
@@ -539,17 +683,53 @@ function refreshTimes() {
 function toggleSearch(force) {
   const on = force == null ? !view.showingSearch : force;
   bridge.action('setShowingSearch', on);
-  if (on) setTimeout(() => $('#searchInput').focus(), 0);
-  else $('#searchInput').value = '';
+  if (on) {
+    // 검색칸은 주 프로세스가 보낸 화면 자료로 다시 그리기 전까지 숨어 있어 초점을 받지 못한다.
+    // Ctrl+F 뒤 바로 친 글자를 잃지 않게 칸을 먼저 보이고 바로 초점을 준다.
+    $('#searchBox').hidden = false;
+    $('#searchInput').focus();
+  } else {
+    $('#searchInput').value = '';
+  }
 }
+
+/**
+ * 마우스를 누른 버튼과 그 이름표(data-action·data-args 또는 data-ui).
+ * 누르고 떼는 사이에 화면 자료가 와서 다시 그려지면(앞 동작의 결과, 확인 결과 등) 누른 버튼이 새 버튼으로 바뀐다.
+ * 그러면 브라우저는 클릭을 보내지 않아 누른 것이 사라진다. 그때는 뗀 자리의 버튼이 같은 동작이면 그 버튼을 누른 것으로 본다.
+ */
+let pressed = null;
+const actionKey = (element) => (element
+  ? `${element.dataset.ui || ''}|${element.dataset.action || ''}|${element.dataset.args || ''}|${element.dataset.event || ''}` : null);
+
+document.addEventListener('pointerdown', (event) => {
+  // 마우스로 조작하는 중에는 초점을 옮겨도 고리를 그리지 않는다(.pointer-nav). 키를 누르면 다시 보인다.
+  document.documentElement.classList.add('pointer-nav');
+  if (event.button !== 0) { pressed = null; return; }
+  const element = event.target.closest('[data-action], [data-ui]');
+  pressed = element ? { element, key: actionKey(element) } : null;
+});
+
+document.addEventListener('pointerup', (event) => {
+  const before = pressed;
+  pressed = null;
+  if (!before || before.element.isConnected) return;
+  const under = document.elementFromPoint(event.clientX, event.clientY)?.closest('[data-action], [data-ui]');
+  if (under && actionKey(under) === before.key) activate(under, event);
+});
 
 document.addEventListener('click', (event) => {
   const target = event.target.closest('[data-action], [data-ui]');
-  const insideMenu = event.target.closest('#menu');
   if (!target) {
-    if (!insideMenu) closeMenu();
+    if (!event.target.closest('#menu')) closeMenu();
     return;
   }
+  activate(target, event);
+});
+
+/** 버튼 하나를 누른 것으로 처리한다(click, 또는 다시 그려진 뒤의 pointerup). */
+function activate(target, event) {
+  const insideMenu = event.target.closest('#menu') || target.closest('#menu');
   if (target.dataset.ui) {
     const ui = target.dataset.ui;
     if (ui === 'toggleSearch') toggleSearch();
@@ -568,7 +748,7 @@ document.addEventListener('click', (event) => {
   const args = JSON.parse(target.dataset.args || '[]');
   if (insideMenu) closeMenu({ returnFocus: true });
   bridge.action(target.dataset.action, ...args);
-});
+}
 
 /** 항목(또는 저장소 메뉴의 저장소)의 우클릭 메뉴를 연다. point가 없으면 그 항목 바로 아래에 연다. */
 function openContextMenu(target, point = null) {
@@ -593,6 +773,8 @@ document.addEventListener('contextmenu', (event) => {
   const fromKeyboard = event.clientX === 0 && event.clientY === 0;
   openContextMenu(event.target, fromKeyboard ? null : { x: event.clientX, y: event.clientY });
 });
+
+document.addEventListener('keydown', () => document.documentElement.classList.remove('pointer-nav'), true);
 
 document.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
@@ -649,6 +831,10 @@ async function start() {
   $('#searchIcon').innerHTML = icon('search');
   $('#searchClear').innerHTML = icon('x');
   $('#searchInput').placeholder = t('Search title, repository, person, #number');
+  // 자리표시 글은 이름이 아니라서 화면 읽기용 이름을 따로 준다.
+  $('#searchInput').setAttribute('aria-label', t('Search activity'));
+  $('#searchClear').setAttribute('aria-label', t('Clear search'));
+  $('#searchClear').title = t('Clear search');
   view = init.view;
   render();
   bridge.onView((next) => {
@@ -656,13 +842,20 @@ async function start() {
     render();
   });
   bridge.onDrawTray((request) => bridge.sendTrayImage(drawTrayIcons($('#trayCanvas'), request)));
-  bridge.onShown((maxHeight) => {
+  bridge.onShown((maxHeight, { updateCopied = false } = {}) => {
     setMaxHeight(maxHeight);
-    copiedUpdate = false;
-    refreshTimes();
+    // 패널을 열 때마다 목록 맨 위(가장 새 항목)부터 보인다. 패널은 닫아도 화면을 버리지 않아,
+    // 그대로 두면 지난번 스크롤 위치에 머물러 그 사이 쌓인 새 항목을 보려면 다시 올려야 한다.
+    const list = $('#list');
+    if (list) list.scrollTop = 0;
+    if (copiedUpdate !== updateCopied) {
+      copiedUpdate = updateCopied;
+      render();
+    }
+    refreshTimes(true);
     if (view.showingSearch) $('#searchInput').focus();
   });
-  setInterval(refreshTimes, 30000);
+  setInterval(() => refreshTimes(), 30000);
   new ResizeObserver(reportSize).observe(document.body);
 }
 

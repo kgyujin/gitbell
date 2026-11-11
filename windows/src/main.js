@@ -24,7 +24,7 @@ const { AppModel, URLS } = require('./app-model');
 const { createL10n, prefersKorean } = require('./l10n');
 const { createFileStore, createMemoryStore } = require('./file-store');
 const { createTokenStore } = require('./token-store');
-const { createGitHubAPI } = require('./core/github-api');
+const { createGitHubAPI, createResponseCache } = require('./core/github-api');
 const { panelPosition, MARGIN } = require('./window-position');
 const { demoState } = require('./demo-data');
 const { repoName } = require('./core/models');
@@ -140,6 +140,13 @@ let tray;
 let lastHiddenAt = 0;
 let quitting = false;
 let lastTrayKey = '';
+let lastTrayToolTip = '';
+/** 확인 사이에 이어 쓰는 GitHub 응답(조건부 요청용). 토큰이 바뀌면 스스로 비운다. */
+const responseCache = createResponseCache();
+/** 패널이 숨어 있는 동안 화면 자료가 바뀌었는지. 열 때 한 번만 보낸다(sendView). */
+let viewStale = false;
+/** 붙잡아 두는 알림 객체의 최대 수(showNotification). */
+const MAX_LIVE_NOTIFICATIONS = 100;
 const liveNotifications = new Set();
 /** 항목 id → 그 항목의 알림. 읽음으로 바꾸면 알림 센터에서도 지운다. */
 const notificationsById = new Map();
@@ -147,13 +154,17 @@ const notificationsById = new Map();
 const summaryNotifications = new Set();
 
 function start() {
-  l10n = createL10n({ korean: prefersKorean(app.getPreferredSystemLanguages()) });
+  // 날짜·시각은 시스템 지역 형식을 따른다(언어가 화면 언어와 같을 때, 예: en-GB면 24시간제).
+  l10n = createL10n({ korean: prefersKorean(app.getPreferredSystemLanguages()), systemLocale: app.getLocale() });
   const dataDir = app.getPath('userData');
   model = new AppModel({
     store: isDemo ? createMemoryStore() : createFileStore(dataDir),
     tokens: createTokenStore({ file: path.join(dataDir, 'token.bin'), safeStorage }),
-    createAPI: (token) => createGitHubAPI({ token, baseURL: process.env.GITBELL_API_URL || undefined }),
-    notifier: { post: postNotifications, postTest: postTestNotification, dismiss: dismissNotifications },
+    createAPI: (token) => createGitHubAPI({ token, baseURL: process.env.GITBELL_API_URL || undefined, cache: responseCache }),
+    notifier: {
+      post: postNotifications, postTest: postTestNotification, postUpdate: postUpdateNotification,
+      dismiss: dismissNotifications,
+    },
     system: {
       openURL: openHTTPS,
       copyText: (text) => clipboard.writeText(text),
@@ -183,7 +194,8 @@ function start() {
   registerIPC();
   model.start();
   // 잠자기에서 깨면 다음 주기를 기다리지 않고 바로 확인한다(네트워크가 붙을 시간을 조금 준다).
-  powerMonitor.on('resume', () => setTimeout(() => model.refresh(), 5000));
+  // 따로 확인하지 않고 주기를 새로 시작해, 깨자마자 두 번 연달아 확인하지 않게 한다.
+  powerMonitor.on('resume', () => setTimeout(() => model.restartLoop(), 5000));
 }
 
 // MARK: 패널
@@ -208,6 +220,8 @@ function createPanel() {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // 글을 쓰는 곳이 토큰·검색칸뿐이라 맞춤법 검사기를 띄우지 않는다(메모리와 사전 내려받기를 아낀다).
+      spellcheck: false,
     },
   });
   panel.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
@@ -231,11 +245,16 @@ function hidePanel() {
   lastHiddenAt = Date.now();
 }
 
-function showPanel() {
+/** updateCopied: 업데이트 명령을 방금 복사했으면 패널의 새 버전 띠에 '복사됨'을 보인다. */
+function showPanel({ updateCopied = false } = {}) {
   positionPanel();
+  if (viewStale && !panel.webContents.isLoading()) {
+    viewStale = false;
+    panel.webContents.send('view', model.viewModel());
+  }
   panel.show();
   panel.focus();
-  panel.webContents.send('shown', maxPanelHeight());
+  panel.webContents.send('shown', maxPanelHeight(), { updateCopied });
 }
 
 function togglePanel() {
@@ -271,8 +290,18 @@ function resizePanel(contentHeight) {
   if (panel.isVisible()) positionPanel();
 }
 
+/**
+ * 화면 자료를 패널에 보낸다. 패널이 숨어 있으면 보내지 않고 열 때(showPanel) 보낸다.
+ * 패널은 대부분의 시간 숨어 있으므로 숨은 동안에는 보내지 않고, 열 때(showPanel) 한 번만 보낸다.
+ */
 function sendView() {
-  if (panel && !panel.webContents.isLoading()) panel.webContents.send('view', model.viewModel());
+  if (!panel || panel.webContents.isLoading()) return;
+  if (!panel.isVisible()) {
+    viewStale = true;
+    return;
+  }
+  viewStale = false;
+  panel.webContents.send('view', model.viewModel());
 }
 
 // MARK: 트레이
@@ -282,8 +311,8 @@ function createTray() {
   tray.setToolTip('GitBell');
   tray.on('click', togglePanel);
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: l10n.t('Open GitBell'), click: showPanel },
-    { label: l10n.t('Refresh'), click: () => model.refresh() },
+    { label: l10n.t('Open GitBell'), click: () => showPanel() },
+    { label: l10n.t('Refresh'), click: () => model.refresh({ readAll: true }) },
     { type: 'separator' },
     // 설치기가 설치한 앱에서만 보인다(개발 중에는 지울 폴더가 없다).
     ...(process.platform === 'win32' && Uninstall.isStandardInstall(app.getAppPath())
@@ -311,7 +340,12 @@ function darkTaskbar() {
 /** 아이콘 그림은 패널 화면이 canvas로 그려 돌려준다('tray-image'). */
 function updateTray() {
   const state = model.trayState();
-  tray.setToolTip(state.unread > 0 ? `GitBell · ${l10n.format('%lld unread', state.unread)}` : 'GitBell');
+  // 화면 자료가 바뀔 때마다 불리므로, 설명 글과 그림은 달라졌을 때만 바꾼다.
+  const toolTip = state.unread > 0 ? `GitBell · ${l10n.format('%lld unread', state.unread)}` : 'GitBell';
+  if (toolTip !== lastTrayToolTip) {
+    lastTrayToolTip = toolTip;
+    tray.setToolTip(toolTip);
+  }
   const request = { ...state, dark: darkTaskbar() };
   const key = JSON.stringify(request);
   if (key === lastTrayKey || panel.webContents.isLoading()) return;
@@ -340,6 +374,9 @@ function showNotification({ title, body, playsSound, url, id, onClick, summary =
   const notification = new Notification({ title, body, silent: !playsSound, icon: ICON });
   // 알림 객체가 사라지면 누름 이벤트도 사라져서, 닫힐 때까지 붙잡아 둔다.
   liveNotifications.add(notification);
+  // Windows는 알림 센터로 넘어간 알림의 'close'를 늦게 보내거나 보내지 않기도 해서, 오래 켜 두면 끝없이 쌓인다.
+  // 오래된 것부터 놓아준다(알림 센터에서 지우지는 않는다. 누르면 아무 일도 하지 않을 뿐이다).
+  if (liveNotifications.size > MAX_LIVE_NOTIFICATIONS) forgetNotification(liveNotifications.values().next().value);
   if (id) notificationsById.set(id, notification);
   if (summary) summaryNotifications.add(notification);
   notification.on('click', () => {
@@ -348,12 +385,16 @@ function showNotification({ title, body, playsSound, url, id, onClick, summary =
     // 알림을 눌러 페이지를 열었으니 같은 PR의 다른 안 읽은 항목도 읽음이 된다.
     if (id) model.markOpened(id);
   });
-  notification.on('close', () => {
-    liveNotifications.delete(notification);
-    summaryNotifications.delete(notification);
-    if (id && notificationsById.get(id) === notification) notificationsById.delete(id);
-  });
+  notification.on('close', () => forgetNotification(notification));
   notification.show();
+}
+
+function forgetNotification(notification) {
+  liveNotifications.delete(notification);
+  summaryNotifications.delete(notification);
+  for (const [id, value] of notificationsById) {
+    if (value === notification) notificationsById.delete(id);
+  }
 }
 
 /** GitBell에서 읽은 항목의 알림을 알림 센터에서 지운다. */
@@ -369,20 +410,36 @@ function dismissNotifications(ids, includeSummaries) {
 function postNotifications(events, playsSound) {
   if (events.length > NOTIFICATION_LIMIT) {
     const repos = [...new Set(events.map((event) => repoName(event.repo)))].sort().join(', ');
+    // 요약은 하나만 둔다. 새 요약을 보내기 전에 예전 요약을 닫아, 확인할 때마다 요약이 쌓이지 않게 한다.
+    for (const old of [...summaryNotifications]) old.close();
     // 많이 쌓였을 때는 GitHub 알림 페이지보다 GitBell 목록이 보기 쉬워 패널을 연다.
     showNotification({ title: 'GitBell', body: `${l10n.format('%lld new activities', events.length)}\n${repos}`,
-      playsSound, onClick: showPanel, summary: true });
+      playsSound, onClick: () => showPanel(), summary: true });
     return;
   }
-  for (const event of events) {
+  // 한 번에 여러 개가 오면 소리는 첫 알림에서 한 번만 낸다.
+  events.forEach((event, index) => {
     showNotification({ title: repoName(event.repo), body: `${l10n.headline(event)}\n${l10n.title(event)}`,
-      playsSound, url: event.url, id: event.id });
-  }
+      playsSound: playsSound && index === 0, url: event.url, id: event.id });
+  });
 }
 
 function postTestNotification(playsSound) {
   showNotification({ title: 'GitBell', body: `${l10n.t('Test notification')}\n${l10n.t('Notifications are working. Click to open GitHub.')}`,
     playsSound, url: URLS.notifications });
+}
+
+/** 새 버전 알림. 누르면 업데이트 명령을 복사하고, 복사됐다는 띠가 보이도록 패널을 연다. */
+function postUpdateNotification(version, playsSound) {
+  showNotification({
+    title: 'GitBell',
+    body: `${l10n.format('GitBell %@ is available', version)}\n${l10n.t('Click to copy the update command (npx gitbell@latest).')}`,
+    playsSound,
+    onClick: () => {
+      model.copyUpdateCommand();
+      showPanel({ updateCopied: true });
+    },
+  });
 }
 
 async function fetchLatestVersion() {
@@ -400,7 +457,8 @@ async function fetchLatestVersion() {
 /** 화면이 부를 수 있는 동작. 이름으로만 부르고, 주소 같은 값은 앱이 정한다. */
 function registerIPC() {
   const actions = {
-    refresh: () => model.refresh(),
+    // 사용자가 직접 누른 새로고침이라 조용한 저장소도 모두 읽는다.
+    refresh: () => model.refresh({ readAll: true }),
     setQuery: (patch) => model.setQuery(patch),
     resetFilters: () => model.resetFilters(),
     setShowingSearch: (on) => model.setShowingSearch(on),

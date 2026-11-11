@@ -50,18 +50,27 @@ function pluralKey(key, args, translated) {
   return Number(count) === 1 ? SINGULAR[key] : key;
 }
 
-/** 첫 번째 선호 언어가 한국어인지. GITBELL_LANG(ko/en)으로 바꿀 수 있다. */
+/**
+ * 화면을 한국어로 보일지. 선호 언어 목록에서 GitBell이 가진 언어(한국어·영어) 중 먼저 나오는 것을 쓴다
+ * (macOS판 Bundle.preferredLocalizations와 같은 규칙: [ja, ko]면 한국어). GITBELL_LANG(ko/en)으로 바꿀 수 있다.
+ */
 function prefersKorean(languages, override = process.env.GITBELL_LANG) {
   if (/^ko/i.test(override || '')) return true;
   if (/^en/i.test(override || '')) return false;
-  return /^ko/i.test((languages && languages[0]) || '');
+  for (const language of languages || []) {
+    if (/^ko/i.test(language)) return true;
+    if (/^en/i.test(language)) return false;
+  }
+  return false;
 }
 
 /**
  * @param {{korean: boolean, strings?: Map<string,string>, now?: () => number}} options
  */
-function createL10n({ korean, strings = korean ? loadKoreanStrings() : new Map(), now = Date.now }) {
-  const locale = korean ? 'ko-KR' : 'en-US';
+function createL10n({ korean, strings = korean ? loadKoreanStrings() : new Map(), now = Date.now, systemLocale = '' }) {
+  // 시스템 지역 형식이 화면 언어와 같은 언어면 그대로 쓴다(24시간제 같은 개인 설정을 지킨다). 아니면 화면 언어의 기본 형식.
+  const language = korean ? 'ko' : 'en';
+  const locale = systemLocale && systemLocale.toLowerCase().startsWith(language) ? systemLocale : (korean ? 'ko-KR' : 'en-US');
   const t = (key) => (korean && strings.has(key) ? strings.get(key) : key);
   /** %lld·%@ 자리에 값을 차례로 넣는다. */
   const format = (key, ...args) => {

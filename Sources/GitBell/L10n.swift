@@ -68,6 +68,16 @@ enum L10n {
         }
     }
 
+    /// 종류 필터 아이콘. 알림 설정의 묶음 아이콘을 그대로 써서 두 곳의 모양이 늘 같다. '전체'는 글자만.
+    static func categorySymbol(_ category: EventCategory?) -> String? {
+        switch category {
+        case .none: return nil
+        case .pullRequests: return NotificationGroup.newPullRequests.symbol
+        case .reviews: return NotificationGroup.reviews.symbol
+        case .commits: return NotificationGroup.commits.symbol
+        }
+    }
+
     static func groupLabel(_ group: NotificationGroup) -> String {
         switch group {
         case .newPullRequests: return string("New pull requests")
@@ -122,29 +132,43 @@ enum L10n {
         return Locale(identifier: Locale.current.region.map { "\(language)_\($0.identifier)" } ?? language)
     }()
 
-    static func relative(_ date: Date) -> String {
-        if Date().timeIntervalSince(date) < 60 { return string("now") }
+    // 날짜 포매터는 만들기가 비싸고 목록의 줄마다 불리므로 한 번만 만들어 쓴다.
+    // 화면에서만(메인 스레드) 쓴다.
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.locale = locale
         formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
+        return formatter
+    }()
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.setLocalizedDateFormatFromTemplate("MMMMdEEE")
+        return formatter
+    }()
+
+    private static let clockFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    static func relative(_ date: Date) -> String {
+        if Date().timeIntervalSince(date) < 60 { return string("now") }
+        return relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 
     static func dayTitle(_ date: Date) -> String {
         let calendar = Calendar.current
         if calendar.isDateInToday(date) { return string("Today") }
         if calendar.isDateInYesterday(date) { return string("Yesterday") }
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.setLocalizedDateFormatFromTemplate("MMMMdEEE")
-        return formatter.string(from: date)
+        return dayFormatter.string(from: date)
     }
 
     static func clock(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        clockFormatter.string(from: date)
     }
 }
 

@@ -34,8 +34,10 @@ struct MenuBarLabel: View {
         } else if unread > 0 {
             HStack(spacing: 2) {
                 Image(systemName: "bell.badge.fill")
-                Text("\(unread)")
+                // 메뉴 막대 자리는 좁아 세 자리부터는 '99+'로 줄인다(Windows 트레이 배지와 같은 규칙).
+                Text(unread > 99 ? "99+" : "\(unread)")
             }
+            .accessibilityLabel(L10n.format("%lld unread", unread))
         } else {
             Image(systemName: "bell")
         }

@@ -35,6 +35,9 @@ async function launch({ args = [], env = isolatedEnv() } = {}) {
     env,
   });
   const window = await app.firstWindow();
+  // 패널은 다른 창이 초점을 가져가면 숨는다(blur). 테스트 중에 다른 앱이 앞으로 오면 숨은 창에 보낸
+  // 키 입력이 끝나지 않아 테스트가 멈췄다. 테스트에서는 숨기지 않게 이 동작만 뗀다.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].removeAllListeners('blur'));
   const errors = [];
   window.on('pageerror', (error) => errors.push(error.message));
   return { app, window, errors };

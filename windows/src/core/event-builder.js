@@ -50,12 +50,16 @@ function build(raw, repo, since) {
     const author = pull.user && pull.user.login;
     if (!author) continue;
     authorByNumber.set(pull.number, author);
-    if (pull.head && pull.head.ref) authorByBranch.set(pull.head.ref, author);
+    // 이 저장소 안의 브랜치만 이어 준다. 포크에서 main 같은 이름으로 올린 PR이 있으면
+    // 원래 저장소의 main에 들어온 push가 모두 그 사람의 PR 활동으로 잘못 잡혔다.
+    if (pull.head && pull.head.ref && pull.head.repo && pull.head.repo.full_name === repo) authorByBranch.set(pull.head.ref, author);
   }
 
   const mergerBySHA = new Map();
   for (const item of activity) {
-    if (item.activity_type === 'pr_merge' && item.after && item.actor) mergerBySHA.set(item.after, item.actor);
+    // 머지 대기열(merge queue)로 머지한 것도 머지한 사람을 찾을 수 있게 함께 본다.
+    const isMerge = item.activity_type === 'pr_merge' || item.activity_type === 'merge_queue_merge';
+    if (isMerge && item.after && item.actor) mergerBySHA.set(item.after, item.actor);
   }
 
   for (const pull of pulls) {
@@ -131,7 +135,8 @@ function build(raw, repo, since) {
     else if (item.activity_type === 'force_push') kind = EventKind.forcePush;
     else if (item.activity_type === 'branch_creation') kind = EventKind.branchCreated;
     else continue;
-    const branch = (item.ref || '').replaceAll('refs/heads/', '');
+    // 앞에 붙은 refs/heads/만 뗀다(브랜치 이름 안에 같은 글자가 있어도 그대로 둔다).
+    const branch = (item.ref || '').replace(/^refs\/heads\//, '');
     const before = item.before || '';
     const after = item.after || '';
     let url;
