@@ -1,7 +1,7 @@
-# npm 배포. Actions 탭에서 손으로 실행한다(main에서만).
-# npm 신뢰 배포(OIDC)를 쓰므로 토큰을 저장하지 않는다. npmjs.com의 gitbell → Settings → Trusted Publisher에
-# GitHub Actions(kgyujin/gitbell, 워크플로 release.yml)가 등록되어 있어야 한다.
-# 하는 일: 테스트 → package.json 버전이 아직 npm에 없는지 확인 → 배포(출처 증명 포함) → v<버전> 태그.
+# 설치 파일 배포. Actions 탭에서 손으로 실행한다(main에서만).
+# 하는 일: package.json 버전의 태그가 아직 없는지 확인 → 세 OS에서 테스트하고 설치 파일을 만든다
+#          → v<버전> 태그와 GitHub Release를 만들고 설치 파일을 올린다.
+# 설치 파일은 코드 서명을 하지 않는다(macOS는 ad-hoc 서명만). 처음 열 때의 경고와 여는 방법은 README에 있다.
 name: Release
 
 on:
@@ -9,38 +9,68 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
-  publish:
+  version:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the version is new
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version is already released. Bump the version first." >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: version
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
-          registry-url: https://registry.npmjs.org
-      - name: Use an npm that supports trusted publishing
-        run: npm install -g npm@^11.5.1
-      - name: Test the Windows app
-        working-directory: windows
+          node-version: 22
+      - name: Install
+        run: npm ci
+      - name: Unit tests
+        run: npm test
+      - name: Build installers
+        run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          path: |
+            dist/*.dmg
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
+
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          npm ci
-          npm test
-      - name: Check the version is new
-        id: version
-        run: |
-          version=$(node -p "require('./package.json').version")
-          if npm view "gitbell@$version" version >/dev/null 2>&1; then
-            echo "gitbell@$version is already on npm. Bump the version first." >&2
-            exit 1
-          fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-      - name: Publish
-        run: npm publish --provenance --access public
-      - name: Tag
-        run: |
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
+          ls -la installers
+          gh release create "v$VERSION" installers/* --target "$GITHUB_SHA" --title "GitBell $VERSION" --generate-notes
