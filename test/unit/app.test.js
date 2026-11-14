@@ -20,7 +20,8 @@ const { user } = require('./fixtures');
 const ROOT = path.resolve(__dirname, '..', '..');
 
 function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, savedState = null, savedSettings = null, undoMs,
-  latestVersion = '0.5.0' } = {}) {
+  latestVersion = '0.5.0', isOnline = () => true } = {}) {
+  const requested = [];
   const saved = { state: savedState, settings: savedSettings };
   const opened = [];
   const copied = [];
@@ -41,6 +42,7 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
     },
     createAPI: () => ({
       async get(pathname) {
+        requested.push(pathname);
         const key = Object.keys(routes).find((prefix) => pathname.startsWith(prefix));
         if (!key) throw new GitHubError('http', 'Not Found', 404);
         const value = routes[key];
@@ -74,8 +76,9 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
     now: () => '2026-11-09T06:00:00Z',
     fetchLatestVersion: async () => (typeof latestVersion === 'function' ? latestVersion() : latestVersion),
     undoMs,
+    isOnline,
   });
-  return { model, saved, opened, copied, notified, dismissed };
+  return { model, saved, opened, copied, notified, dismissed, requested };
 }
 
 const pushRoutes = (activity) => ({
@@ -643,4 +646,30 @@ test('AppModel: 검색어를 칠 때는 설정 파일을 다시 쓰지 않는다
   model.setQuery({ search: 'abc' });
   assert.equal(saved.settings, null, '검색어만 바뀌면 저장하지 않는다');
   assert.ok(before.includes('"unreadOnly":true'));
+});
+
+// MARK: 오프라인
+
+test('AppModel: 오프라인이면 요청하지 않고, 다시 연결되면 바로 확인한다', async () => {
+  let online = false;
+  const { model, requested } = harness({ routes: pushRoutes([push(1, 'amy')]), isOnline: () => online });
+  await model.refresh();
+  assert.deepEqual(requested, [], '연결이 없으면 GitHub에 보내지 않는다');
+  assert.equal(model.problem.type, 'network');
+  assert.equal(model.viewModel().problemMessage, "Couldn't reach GitHub. You appear to be offline.");
+
+  model.timer = setTimeout(() => {}, 60000);
+  let restarted = 0;
+  model.restartLoop = () => { restarted += 1; clearTimeout(model.timer); };
+  online = true;
+  model.networkOnline();
+  assert.equal(restarted, 1, '연결 문제로 멈춰 있었으면 주기를 새로 시작한다(바로 확인)');
+
+  await model.refresh();
+  assert.ok(requested.length > 0);
+  assert.equal(model.problem, null);
+  model.timer = setTimeout(() => {}, 60000);
+  model.networkOnline();
+  clearTimeout(model.timer);
+  assert.equal(restarted, 1, '문제가 없으면 다시 시작하지 않는다(확인이 겹치지 않게)');
 });

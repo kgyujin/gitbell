@@ -850,6 +850,8 @@ async function start() {
     if (view.showingSearch) $('#searchInput').focus();
   });
   setInterval(() => refreshTimes(), 30000);
+  // 인터넷이 다시 연결되면 앱이 바로 확인한다(끊긴 동안에는 확인을 건너뛴다).
+  window.addEventListener('online', () => bridge.action('networkOnline'));
   new ResizeObserver(reportSize).observe(document.body);
 }
 

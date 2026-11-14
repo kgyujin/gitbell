@@ -150,11 +150,58 @@ async function snapshot(api, repo, since, config = WatchState.DEFAULT_CONFIG) {
     api.get(`repos/${repo}/issues/comments?since=${since}&sort=created&direction=desc&per_page=100`),
     api.get(`repos/${repo}/activity?per_page=50`),
   ]);
-  // 바뀐 PR의 리뷰를 몇 개씩 동시에 읽는다(한 PR씩 차례로 읽으면 처음 실행 때 저장소마다 수십 번을 기다린다).
   const updated = pulls.filter((pull) => pull.updated_at && Date.parse(pull.updated_at) >= Date.parse(since));
-  const reviews = await inChunks(updated, config.maxConcurrentRepos,
-    async (pull) => [pull.number, await api.get(`repos/${repo}/pulls/${pull.number}/reviews?per_page=100`)]);
-  return { pulls, reviewsByPR: Object.fromEntries(reviews), reviewComments, issueComments, activity };
+  const reviewsByPR = await reviewsFor(api, repo, updated.map((pull) => pull.number), config);
+  return { pulls, reviewsByPR, reviewComments, issueComments, activity };
+}
+
+/**
+ * 바뀐 PR들의 리뷰. GraphQL 질의 한 번으로 모두 읽고(PR마다 REST 한 번씩 부르지 않아 REST 한도를 아낀다),
+ * GraphQL을 쓸 수 없거나 실패하면 예전처럼 PR마다 REST로 몇 개씩 동시에 읽는다.
+ * 토큰이 틀린 것(401)은 REST로 다시 해도 같으므로 그대로 올린다.
+ */
+async function reviewsFor(api, repo, numbers, config) {
+  if (numbers.length === 0) return {};
+  if (typeof api.graphql === 'function') {
+    try {
+      return await reviewsByGraphQL(api, repo, numbers);
+    } catch (error) {
+      if (error && error.kind === 'unauthorized') throw error;
+    }
+  }
+  const reviews = await inChunks(numbers, config.maxConcurrentRepos,
+    async (number) => [number, await api.get(`repos/${repo}/pulls/${number}/reviews?per_page=100`)]);
+  return Object.fromEntries(reviews);
+}
+
+const REVIEW_FIELDS = 'databaseId state body submittedAt url author { __typename login avatarUrl }';
+
+async function reviewsByGraphQL(api, repo, numbers) {
+  const [owner, name] = repo.split('/');
+  const fields = numbers.map((number) => `p${Number(number)}: pullRequest(number: ${Number(number)}) { reviews(last: 100) { nodes { ${REVIEW_FIELDS} } } }`);
+  const data = await api.graphql(`query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields.join(' ')} } }`,
+    { owner, name });
+  const repository = (data && data.repository) || {};
+  const result = {};
+  for (const number of numbers) {
+    const pull = repository[`p${Number(number)}`];
+    result[number] = pull && pull.reviews ? pull.reviews.nodes.filter(Boolean).map(restReview) : [];
+  }
+  return result;
+}
+
+/** GraphQL 리뷰를 REST 리뷰 모양으로 바꾼다. GraphQL은 봇 로그인에 '[bot]'을 붙이지 않아 REST처럼 붙인다. */
+function restReview(node) {
+  const author = node.author;
+  const login = author ? (author.__typename === 'Bot' ? `${author.login}[bot]` : author.login) : null;
+  return {
+    id: node.databaseId,
+    state: node.state,
+    body: node.body || '',
+    submitted_at: node.submittedAt,
+    html_url: node.url,
+    user: login ? { login, avatar_url: author.avatarUrl || null } : null,
+  };
 }
 
 /** push에 커밋 수와 마지막 커밋 제목을 채운다. 실패해도 항목은 그대로 보인다. */
@@ -208,4 +255,4 @@ function isTemporary(error) {
   return error.kind === 'http' && error.status >= 500;
 }
 
-module.exports = { refresh, collect, snapshot, resolvePush, resolvePushDetail, isTemporary, iso, sinceTime };
+module.exports = { refresh, collect, snapshot, reviewsFor, restReview, resolvePush, resolvePushDetail, isTemporary, iso, sinceTime };

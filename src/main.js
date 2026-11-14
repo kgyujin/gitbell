@@ -125,6 +125,7 @@ function start() {
     l10n,
     version: require('../package.json').version,
     fetchLatestVersion,
+    isOnline: () => net.isOnline(),
   });
   if (isDemo) model.loadDemo(demoState());
 
@@ -428,6 +429,7 @@ function registerIPC() {
     setLaunchAtLogin: (on) => model.setLaunchAtLogin(on),
     sendTestNotification: () => model.sendTestNotification(),
     openUpdate: () => model.openUpdate(),
+    networkOnline: () => model.networkOnline(),
     saveToken: (token) => model.saveToken(token),
     removeSavedToken: () => model.removeSavedToken(),
     openNotificationSettings: () => { if (NOTIFICATION_SETTINGS) shell.openExternal(NOTIFICATION_SETTINGS); },

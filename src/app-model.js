@@ -77,9 +77,10 @@ class AppModel {
    * @param {string} deps.version
    * @param {() => Promise<string|null>} [deps.fetchLatestVersion]
    * @param {() => string} [deps.now]  ISO 시각
+   * @param {() => boolean} [deps.isOnline]  인터넷에 연결돼 있는지. false면 확인을 건너뛴다.
    */
   constructor(deps) {
-    this.deps = { now: () => new Date().toISOString(), fetchLatestVersion: async () => null, ...deps };
+    this.deps = { now: () => new Date().toISOString(), fetchLatestVersion: async () => null, isOnline: () => true, ...deps };
     this.l10n = deps.l10n;
     this.listeners = new Set();
     this.state = WatchState.migrated(this.deps.store.loadState());
@@ -199,6 +200,11 @@ class AppModel {
     // API 한도에 걸렸으면 풀리는 시각까지는 보내지 않는다(보내도 실패하고 2차 한도 위험만 커진다).
     if (this.problem && this.problem.type === 'rateLimited' && this.problem.resetAt
       && Date.parse(this.problem.resetAt) > Date.parse(this.deps.now())) return;
+    // 연결이 없으면 요청을 보내지 않는다(어차피 실패하고 배터리만 쓴다). 다시 연결되면 networkOnline이 바로 확인한다.
+    if (!this.deps.isOnline()) {
+      this.problem = { type: 'network', detail: this.deps.l10n.t('You appear to be offline.') };
+      return;
+    }
     const usedCachedToken = this.cachedToken != null;
     try {
       const token = await this.currentToken();
@@ -265,6 +271,11 @@ class AppModel {
       return l10n.t('You appear to be offline.');
     }
     return message;
+  }
+
+  /** 인터넷이 다시 연결됐을 때. 연결 문제로 멈춰 있었으면 다음 주기를 기다리지 않고 바로 확인한다. */
+  networkOnline() {
+    if (this.problem && this.problem.type === 'network' && this.timer) this.restartLoop();
   }
 
   // MARK: 목록

@@ -1,4 +1,4 @@
-// GitHub REST API를 읽는 얇은 클라이언트.
+// GitHub REST·GraphQL API를 읽는 얇은 클라이언트.
 // 토큰은 메모리에만 두고 로그나 오류 문구에 넣지 않는다.
 'use strict';
 
@@ -122,33 +122,62 @@ function createGitHubAPI({ token, baseURL = 'https://api.github.com/', fetch: fe
         return JSON.parse(cached.text);
       }
       const text = await response.text();
-      if (response.status < 200 || response.status >= 300) {
-        let message = '';
-        try {
-          const body = JSON.parse(text);
-          if (body && typeof body.message === 'string') message = body.message;
-        } catch {
-          // 본문이 JSON이 아니면 상태 코드만 알린다.
-        }
-        // 헤더가 없는 응답(테스트용 가짜 fetch 등)에서도 멈추지 않게 한다.
-        const header = (name) => (response.headers && typeof response.headers.get === 'function' ? response.headers.get(name) : null);
-        const limit = detectRateLimit({
-          status: response.status,
-          remaining: header('x-ratelimit-remaining'),
-          reset: header('x-ratelimit-reset'),
-          retryAfter: header('retry-after'),
-          message,
-        });
-        if (limit) throw new GitHubError('rateLimited', message, response.status, limit.resetAt);
-        throw new GitHubError('http', message, response.status);
-      }
+      if (response.status < 200 || response.status >= 300) throw failure(response, text);
       const body = JSON.parse(text);
       // 테스트용 가짜 응답에는 headers가 없을 수 있어 막아 둔다.
       const etag = response.headers && typeof response.headers.get === 'function' ? response.headers.get('etag') : null;
       if (cache && etag && isReusable(path)) cache.set(key, { etag, text }, token);
       return body;
     },
+    /**
+     * GraphQL 질의 하나를 보낸다. GraphQL 한도(시간당 5,000점)는 REST 한도와 따로 세므로,
+     * 여러 번의 REST 호출을 한 번의 GraphQL로 묶으면 REST 한도를 아낀다. 조건부 요청(304)은 없다.
+     * 일부 항목만 못 읽은 오류(errors와 data가 함께 옴)는 data를 그대로 돌려준다.
+     */
+    async graphql(query, variables = {}) {
+      let response;
+      try {
+        response = await fetchImpl(new URL('graphql', base), {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'User-Agent': 'GitBell' },
+          body: JSON.stringify({ query, variables }),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        throw new GitHubError('network', error && error.message ? error.message : String(error));
+      }
+      if (response.status === 401) throw new GitHubError('unauthorized', '', 401);
+      const text = await response.text();
+      if (response.status < 200 || response.status >= 300) throw failure(response, text);
+      const body = JSON.parse(text);
+      const errors = Array.isArray(body.errors) ? body.errors : [];
+      if (errors.some((error) => error && error.type === 'RATE_LIMITED')) throw new GitHubError('rateLimited', errors[0].message || '', 200);
+      if (!body.data) throw new GitHubError('http', (errors[0] && errors[0].message) || 'GraphQL error', response.status);
+      return body.data;
+    },
   };
+}
+
+/** 2xx가 아닌 응답을 오류로 바꾼다. 한도 초과면 rateLimited(다시 쓸 수 있는 시각 포함), 아니면 http. */
+function failure(response, text) {
+  let message = '';
+  try {
+    const body = JSON.parse(text);
+    if (body && typeof body.message === 'string') message = body.message;
+  } catch {
+    // 본문이 JSON이 아니면 상태 코드만 알린다.
+  }
+  // 헤더가 없는 응답(테스트용 가짜 fetch 등)에서도 멈추지 않게 한다.
+  const header = (name) => (response.headers && typeof response.headers.get === 'function' ? response.headers.get(name) : null);
+  const limit = detectRateLimit({
+    status: response.status,
+    remaining: header('x-ratelimit-remaining'),
+    reset: header('x-ratelimit-reset'),
+    retryAfter: header('retry-after'),
+    message,
+  });
+  if (limit) return new GitHubError('rateLimited', message, response.status, limit.resetAt);
+  return new GitHubError('http', message, response.status);
 }
 
 module.exports = { GitHubError, createGitHubAPI, createResponseCache, detectRateLimit };
