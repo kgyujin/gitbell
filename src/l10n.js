@@ -33,6 +33,7 @@ const SINGULAR = Object.freeze({
   "Couldn't read %lld repositories:": "Couldn't read %lld repository:",
   '%lld new activities': '%lld new activity',
   'Marked %lld items as read': 'Marked %lld item as read',
+  'Based on %lld recent activities GitBell keeps': 'Based on %lld recent activity GitBell keeps',
 });
 
 /** %lld 자리에 들어갈 값이 1이고 번역이 없으면(영어) 단수형 키를 고른다. */

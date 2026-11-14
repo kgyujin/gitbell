@@ -410,6 +410,7 @@ function registerIPC() {
     resetFilters: () => model.resetFilters(),
     setShowingSearch: (on) => model.setShowingSearch(on),
     setShowingSettings: (on) => model.setShowingSettings(on),
+    setShowingChart: (on) => model.setShowingChart(on),
     open: (id) => model.open(id),
     markRead: (id) => model.markRead(id),
     markRepoRead: (repo) => model.markRepoRead(repo),

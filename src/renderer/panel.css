@@ -23,6 +23,10 @@
   --blue: #0969da;
   --teal: #19747a;
   --gray: #6e7781;
+  /* 활동 차트의 종류 색(PR · 리뷰 · 커밋). 색각 이상 검사를 통과한 순서라 바꾸지 않는다. */
+  --chart-pullRequests: #2a78d6;
+  --chart-reviews: #eb6834;
+  --chart-commits: #1baf7a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -44,6 +48,9 @@
     --blue: #58a6ff;
     --teal: #39c5cf;
     --gray: #8b949e;
+    --chart-pullRequests: #3987e5;
+    --chart-reviews: #d95926;
+    --chart-commits: #199e70;
   }
 }
 
@@ -63,10 +70,10 @@ html, body {
 body { border: 1px solid var(--border); }
 
 /* 화면이 작으면 패널 높이가 --max-height로 막히고, 목록·빈 화면·연결 안내·설정만 줄어든다(아래 띠와 바닥 줄은 늘 보인다). */
-#main, #settings, #body { display: flex; flex-direction: column; min-height: 0; }
-#main, #settings { max-height: calc(var(--max-height, 10000px) - 2px); }
-#main > *, #settings > *, #body > * { flex-shrink: 0; }
-#main > #body, #body > .list, #body > .empty, #body > .onboarding, #settings > .settings-scroll { flex-shrink: 1; min-height: 0; }
+#main, #settings, #chart, #body { display: flex; flex-direction: column; min-height: 0; }
+#main, #settings, #chart { max-height: calc(var(--max-height, 10000px) - 2px); }
+#main > *, #settings > *, #chart > *, #body > * { flex-shrink: 0; }
+#main > #body, #body > .list, #body > .empty, #body > .onboarding, #settings > .settings-scroll, #chart > .settings-scroll { flex-shrink: 1; min-height: 0; }
 
 [hidden] { display: none !important; }
 
@@ -541,3 +548,28 @@ code {
   .chip.selected, .segment.selected, .menu-chip.active { outline: 2px solid Highlight; }
   .kind-badge { border: 1px solid CanvasText; }
 }
+
+/* 활동 차트 */
+.chart-card { padding: 12px 0; display: grid; gap: 12px; }
+.chart-legend { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; font-size: 12px; }
+.chart-total strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.chart-key { display: inline-flex; align-items: center; gap: 5px; color: var(--secondary); }
+.chart-key strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.chart-swatch { width: 10px; height: 10px; border-radius: 3px; }
+.chart-swatch.chart-pullRequests, .chart-seg.chart-pullRequests { background: var(--chart-pullRequests); fill: var(--chart-pullRequests); }
+.chart-swatch.chart-reviews, .chart-seg.chart-reviews { background: var(--chart-reviews); fill: var(--chart-reviews); }
+.chart-swatch.chart-commits, .chart-seg.chart-commits { background: var(--chart-commits); fill: var(--chart-commits); }
+.chart-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart-axis { font-size: 10px; fill: var(--tertiary); font-variant-numeric: tabular-nums; }
+.chart-axis.today { fill: var(--secondary); font-weight: 600; }
+.chart-grid { stroke: var(--border); stroke-dasharray: 2 3; }
+.chart-baseline { stroke: var(--border); }
+.chart-hit { fill: transparent; rx: 4; }
+.chart-col:hover .chart-hit { fill: var(--hover); }
+.chart-empty { margin: 8px 0; }
+.chart-repos { padding: 8px 0; display: grid; gap: 8px; }
+.chart-repo { display: grid; grid-template-columns: minmax(0, 9.5em) 1fr 2.5em; align-items: center; gap: 8px; font-size: 12px; }
+.chart-repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-track { height: 8px; border-radius: 0 4px 4px 0; background: var(--card); overflow: hidden; }
+.chart-fill { display: block; height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--chart-pullRequests); }
+.chart-count { text-align: right; font-variant-numeric: tabular-nums; }

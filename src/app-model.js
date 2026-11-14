@@ -6,6 +6,7 @@ const WatchState = require('./core/watch-state');
 const Query = require('./core/activity-query');
 const Prefs = require('./core/preferences');
 const Poller = require('./core/poller');
+const { activityStats } = require('./core/activity-stats');
 const { categoryOf, repoName, EventKind } = require('./core/models');
 
 /** 활동 종류 전체(검색용 화면 이름을 만들 때 쓴다). */
@@ -13,6 +14,8 @@ const KINDS = Object.values(EventKind);
 const { isBot } = require('./core/event-builder');
 
 const REFRESH_CHOICES = [1, 2, 5, 10, 15];
+/** 활동 차트가 보이는 기간(일). */
+const CHART_DAYS = 7;
 /** 여러 항목을 읽음으로 바꾼 뒤 '되돌리기'를 보이는 시간. */
 const UNDO_MS = 8000;
 /** 새 버전 확인 간격(분). 확인 주기(1·2·5·10·15분)로 나누어떨어져야 정확히 1시간마다 확인한다. */
@@ -91,6 +94,7 @@ class AppModel {
     this.tokenSource = null;
     this.availableUpdate = null;
     this.showingSettings = false;
+    this.showingChart = false;
     this.showingSearch = false;
     this.tokenSaveFailed = false;
     /** 방금 여러 항목을 읽음으로 바꾼 기록(되돌리기용). */
@@ -336,6 +340,11 @@ class AppModel {
 
   setShowingSettings(on) {
     this.showingSettings = Boolean(on);
+    this.emit();
+  }
+
+  setShowingChart(on) {
+    this.showingChart = Boolean(on);
     this.emit();
   }
 
@@ -682,6 +691,13 @@ class AppModel {
       showsOnboarding: (this.problem && this.problem.type === 'noToken')
         || (this.problem && this.problem.type === 'unauthorized' && this.state.history.length === 0) || false,
       showingSettings: this.showingSettings,
+      showingChart: this.showingChart,
+      /** 활동 차트 자료. 차트를 볼 때만 만든다(숨긴 저장소·봇 설정을 따른다). */
+      chart: this.showingChart ? {
+        ...activityStats(visible, { now: this.deps.now(), days: CHART_DAYS }),
+        dayCount: CHART_DAYS,
+        historyCount: visible.length,
+      } : null,
       showingSearch: this.showingSearch,
       query: { ...this.settings.query, search: this.search },
       isFiltering: Query.isFiltering(query),

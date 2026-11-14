@@ -97,6 +97,7 @@ function renderHeader() {
     ${view.showsOnboarding ? '' : iconButton('search', keys(t('Search (Ctrl+F)')), 'data-ui="toggleSearch"', { active: view.showingSearch })}
     ${view.visibleUnreadCount > 0 ? iconButton('checkCircle', t('Mark everything shown as read'), actionAttrs('markRead')) : ''}
     ${iconButton('refresh', keys(t('Refresh (Ctrl+R)')), actionAttrs('refresh'), { spinning: view.isRefreshing })}
+    ${view.showsOnboarding ? '' : iconButton('chart', t('Activity chart'), actionAttrs('setShowingChart', true))}
     ${iconButton('settings', keys(t('Settings (Ctrl+,)')), actionAttrs('setShowingSettings', true))}`;
 }
 
@@ -387,6 +388,91 @@ function renderSettings() {
       <button type="button" class="pill" ${actionAttrs('quit')}>${icon('power')}${esc(t('Quit GitBell'))}</button></footer>`;
 }
 
+// MARK: - 활동 차트
+
+/** 종류 순서는 고정이다(아래부터 PR · 리뷰 · 커밋). 색은 panel.css의 --chart-*. */
+const CHART_SERIES = [['pullRequests', 'PRs'], ['reviews', 'Reviews'], ['commits', 'Commits']];
+
+/** 위만 둥근 막대(바닥에 붙은 쪽은 각지게). */
+function roundedTop(x, y, width, height, radius) {
+  const r = Math.min(radius, height / 2, width / 2);
+  return `M${x},${y + height}V${y + r}Q${x},${y} ${x + r},${y}H${x + width - r}Q${x + width},${y} ${x + width},${y + r}V${y + height}Z`;
+}
+
+function dayLabel(date, isToday) {
+  if (isToday) return t('Today');
+  const [year, month, day] = date.split('-').map(Number);
+  return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(new Date(year, month - 1, day));
+}
+
+function dayDetail(day) {
+  const [year, month, date] = day.date.split('-').map(Number);
+  const when = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', weekday: 'short' }).format(new Date(year, month - 1, date));
+  const parts = CHART_SERIES.map(([key, label]) => `${t(label)} ${day.counts[key]}`).join(', ');
+  return `${when} · ${format('%lld items', day.total)} (${parts})`;
+}
+
+/** 날짜별 쌓은 막대. 칸마다 <title>로 그날의 수를 보인다(마우스를 올리면 뜬다). */
+function renderDailyBars(chart) {
+  const width = 368;
+  const top = 14;
+  const plot = 110;
+  const baseline = top + plot;
+  const gap = 8;
+  const barWidth = (width - gap * (chart.days.length - 1)) / chart.days.length;
+  const max = Math.max(chart.max, 1);
+  const columns = chart.days.map((day, index) => {
+    const x = index * (barWidth + gap);
+    let cursor = baseline;
+    const filled = CHART_SERIES.filter(([key]) => day.counts[key] > 0);
+    const segments = filled.map(([key], order) => {
+      const height = Math.max((day.counts[key] / max) * plot, 3);
+      const y = cursor - height;
+      cursor = y;
+      // 쌓인 조각 사이에 2px 틈을 둔다(아래 조각 위쪽을 2px 줄인다).
+      const shown = order < filled.length - 1 ? `M${x},${y + 2}h${barWidth}v${height - 2}h${-barWidth}Z` : roundedTop(x, y, barWidth, height, 4);
+      return `<path class="chart-seg chart-${key}" d="${shown}"/>`;
+    }).join('');
+    const isToday = index === chart.days.length - 1;
+    return `<g class="chart-col"><title>${esc(dayDetail(day))}</title>
+      <rect class="chart-hit" x="${x - gap / 2}" y="0" width="${barWidth + gap}" height="${baseline + 22}"/>
+      ${segments}
+      <text class="chart-axis${isToday ? ' today' : ''}" x="${x + barWidth / 2}" y="${baseline + 16}" text-anchor="middle">${esc(dayLabel(day.date, isToday))}</text></g>`;
+  }).join('');
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${baseline + 22}" role="img" aria-label="${esc(format('Last %lld days', chart.dayCount))}">
+    <line class="chart-grid" x1="0" x2="${width}" y1="${top}" y2="${top}"/>
+    <text class="chart-axis" x="0" y="${top - 4}">${chart.max}</text>
+    ${columns}
+    <line class="chart-baseline" x1="0" x2="${width}" y1="${baseline}" y2="${baseline}"/></svg>`;
+}
+
+function renderChart() {
+  const chart = view.chart;
+  const legend = `<div class="chart-legend">
+    <span class="chart-total"><strong>${chart.total}</strong> <span class="secondary">${esc(t('All'))}</span></span>
+    ${CHART_SERIES.map(([key, label]) => `<span class="chart-key"><span class="chart-swatch chart-${key}"></span>${esc(t(label))} <strong>${chart.totals[key]}</strong></span>`).join('')}</div>`;
+  const daily = chart.total === 0
+    ? `<p class="secondary small chart-empty">${esc(t('No activity in this period'))}</p>`
+    : renderDailyBars(chart);
+  // 화면 읽기 프로그램용 표(색과 막대 길이를 읽지 못해도 같은 수를 알 수 있다).
+  const table = `<table class="sr-only"><caption>${esc(format('Last %lld days', chart.dayCount))}</caption>
+    <tr><th>${esc(t('Date'))}</th>${CHART_SERIES.map(([, label]) => `<th>${esc(t(label))}</th>`).join('')}</tr>
+    ${chart.days.map((day, index) => `<tr><th>${esc(dayLabel(day.date, index === chart.days.length - 1))}</th>${CHART_SERIES.map(([key]) => `<td>${day.counts[key]}</td>`).join('')}</tr>`).join('')}</table>`;
+  const most = Math.max(1, ...chart.repos.map((item) => item.count));
+  const repos = chart.repos.length === 0 ? '' : settingsSection(t('Most active repositories'), `<div class="chart-repos">
+    ${chart.repos.map((item) => `<div class="chart-repo" title="${esc(item.repo)}"><span class="chart-repo-name">${esc(shortened(item.repo, 30))}</span>
+      <span class="chart-track"><span class="chart-fill" style="width:${Math.round((item.count / most) * 100)}%"></span></span>
+      <strong class="chart-count">${item.count}</strong></div>`).join('')}</div>`);
+
+  $('#chart').innerHTML = `
+    <div class="settings-header">${iconButton('chevronLeft', t('Back'), actionAttrs('setShowingChart', false))}<strong>${esc(t('Activity chart'))}</strong></div>
+    <div class="settings-scroll" id="chartScroll">
+      ${settingsSection(format('Last %lld days', chart.dayCount), `<div class="chart-card">${legend}${daily}${table}</div>`)}
+      ${repos}
+      <p class="secondary small">${esc(format('Based on %lld recent activities GitBell keeps', chart.historyCount))}</p>
+    </div>`;
+}
+
 // MARK: - 고르기 메뉴(저장소·정렬·우클릭)
 
 function optionRow({ title, subtitle = '', detail = '', unread = 0, selected = null, symbol = '', label = '', attrs = '' }) {
@@ -558,6 +644,7 @@ function restoreFocus(key) {
 function fallbackFocus(key, shown) {
   // 설정을 열었으면 '뒤로', 닫았으면 위쪽의 '설정' 단추로.
   if (view.showingSettings) return shown('#settings .settings-header button')[0];
+  if (view.showingChart) return shown('#chart .settings-header button')[0];
   // 검색칸을 닫았으면 검색 단추로.
   if (key.selector === '#searchInput') return shown('[data-ui="toggleSearch"]')[0];
   if (key.area === 'settings') return shown('#header [data-action="setShowingSettings"]')[0];
@@ -631,11 +718,15 @@ function render() {
   const settingsScroll = $('#settingsScroll');
   const settingsTop = settingsScroll ? settingsScroll.scrollTop : 0;
 
-  $('#main').hidden = view.showingSettings;
+  const showingChart = view.showingChart && !view.showingSettings && view.chart != null;
+  $('#main').hidden = view.showingSettings || showingChart;
   $('#settings').hidden = !view.showingSettings;
+  $('#chart').hidden = !showingChart;
   if (view.showingSettings) {
     renderSettings();
     $('#settingsScroll').scrollTop = settingsTop;
+  } else if (showingChart) {
+    renderChart();
   } else {
     renderHeader();
     renderSearch();
@@ -801,6 +892,7 @@ document.addEventListener('keydown', (event) => {
     if (!$('#menu').hidden) closeMenu({ returnFocus: true });
     else if (view.showingSearch) toggleSearch(false);
     else if (view.showingSettings) bridge.action('setShowingSettings', false);
+    else if (view.showingChart) bridge.action('setShowingChart', false);
     else bridge.action('hidePanel');
   }
 });
