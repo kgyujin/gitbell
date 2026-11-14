@@ -721,3 +721,8 @@ test('AppModel: GitHub에서 읽은 PR의 활동은 읽음이 되고, GitBell에
   await model.refresh();
   assert.deepEqual(unread(), ['org/repo#ic:2']);
 });
+
+test('토큰: Finder에서 연 macOS 앱도 Homebrew로 설치한 gh를 찾는다', () => {
+  // Finder·로그인 항목으로 연 앱은 PATH에 Homebrew 폴더가 없다.
+  assert.deepEqual(ghCandidates({}, 'darwin'), ['gh', '/opt/homebrew/bin/gh', '/usr/local/bin/gh']);
+});

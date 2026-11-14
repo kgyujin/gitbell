@@ -236,7 +236,7 @@ class AppModel {
       // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.
       this.state = WatchState.adoptingReadMarks(result.state, this.state);
       // GitHub에서 읽은 PR·이슈의 활동은 GitBell에서도 읽음으로 바꾼다(알림 센터의 알림도 지운다).
-      const readOnGitHub = WatchState.applyGitHubReads(this.state);
+      const readOnGitHub = WatchState.applyGitHubReads(this.state, result.newEvents.map((event) => event.id));
       if (readOnGitHub.length && this.deps.notifier.dismiss) this.deps.notifier.dismiss(readOnGitHub, false);
       this.saveState();
       // 기록이 넘쳐 목록에서 빠진 안 읽은 항목의 알림은 알림 센터에서도 지운다(누를 곳이 없는 알림이 남지 않게).

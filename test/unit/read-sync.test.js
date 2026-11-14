@@ -86,3 +86,16 @@ test('상태 파일: 예전 상태에는 threads가 없어도 읽힌다', () => 
   delete old.threads;
   assert.deepEqual(WatchState.migrated(old).threads, {});
 });
+
+test('GitHub → GitBell: 이미 반영한 읽은 시각도, 나중에 들어온 그 전 활동에는 적용한다', () => {
+  const state = stateWith([event('first', 5, '2026-11-09T05:00:00Z')]);
+  WatchState.rememberThreads(state, [thread('100', 5, { unread: false, lastReadAt: '2026-11-09T05:30:00Z' })]);
+  assert.deepEqual(WatchState.applyGitHubReads(state), ['first']);
+
+  // 조용한 저장소를 다시 읽거나 실패한 저장소를 다시 읽어, GitHub에서 읽기 전의 댓글이 뒤늦게 들어왔다.
+  state.history.push(event('late', 5, '2026-11-09T05:20:00Z'), event('newer', 5, '2026-11-09T05:40:00Z'));
+  state.history[0].isUnread = true; // 사용자가 GitBell에서 다시 안 읽음으로 바꾼 항목
+  assert.deepEqual(WatchState.applyGitHubReads(state, ['late', 'newer']), ['late'], '새로 들어온 항목 중 읽은 시각 전의 것만');
+  assert.equal(state.history[0].isUnread, true, '사용자가 다시 안 읽음으로 바꾼 항목은 그대로');
+  assert.equal(state.history[2].isUnread, true, '읽은 뒤에 생긴 활동은 안 읽음');
+});

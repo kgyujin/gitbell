@@ -305,13 +305,19 @@ function rememberThreads(state, notifications) {
 /**
  * GitHub에서 읽은 것을 GitBell에도 반영한다. 스레드의 lastReadAt이 지난번에 반영한 것보다 새로우면,
  * 그 PR·이슈에서 그 시각까지 생긴 활동을 읽음으로 바꾼다. 같은 lastReadAt은 한 번만 반영해서,
- * GitBell에서 다시 '안 읽음'으로 바꾼 항목을 덮어쓰지 않는다. 읽음으로 바뀐 항목 id를 돌려준다.
+ * GitBell에서 다시 '안 읽음'으로 바꾼 항목을 덮어쓰지 않는다.
+ * newIds: 이번 확인에서 새로 들어온 항목. 사용자가 아직 손대지 않았으니, 이미 반영한 lastReadAt이라도
+ * 그 시각 전의 것이면 읽음으로 바꾼다(조용한 저장소를 다시 읽거나 실패를 다시 읽어 뒤늦게 들어온 활동).
+ * 읽음으로 바뀐 항목 id를 돌려준다.
  */
-function applyGitHubReads(state) {
+function applyGitHubReads(state, newIds = []) {
   const changed = [];
+  const fresh = new Set(newIds);
   for (const [key, thread] of Object.entries(state.threads || {})) {
-    if (!thread.lastReadAt || (thread.appliedReadAt && time(thread.lastReadAt) <= time(thread.appliedReadAt))) continue;
+    if (!thread.lastReadAt) continue;
+    const alreadyApplied = thread.appliedReadAt && time(thread.lastReadAt) <= time(thread.appliedReadAt);
     for (const event of state.history) {
+      if (alreadyApplied && !fresh.has(event.id)) continue;
       if (event.isUnread && threadKey(event) === key && time(event.time) <= time(thread.lastReadAt)) {
         event.isUnread = false;
         changed.push(event.id);

@@ -12,6 +12,8 @@ function ghCandidates(env = process.env, platform = process.platform) {
   const candidates = ['gh'];
   if (platform === 'win32' && env.ProgramFiles) candidates.push(path.join(env.ProgramFiles, 'GitHub CLI', 'gh.exe'));
   if (platform === 'win32' && env.LOCALAPPDATA) candidates.push(path.join(env.LOCALAPPDATA, 'Programs', 'GitHub CLI', 'gh.exe'));
+  // Finder·로그인 항목으로 연 macOS 앱은 PATH에 Homebrew 폴더가 없다(Apple 실리콘, Intel 순).
+  if (platform === 'darwin') candidates.push('/opt/homebrew/bin/gh', '/usr/local/bin/gh');
   return candidates;
 }
 
