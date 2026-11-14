@@ -47,3 +47,53 @@ jobs:
           if-no-files-found: ignore
       - name: Package (app folder only)
         run: npx electron-builder --dir --publish never
+
+  # npx 설치기(bin/gitbell.js): 0.5.3을 npx로 설치해 둔 위에 이미 배포된 Release(0.6.0)를 설치해 보고,
+  # 예전 설치본이 정리되는지, 새 앱이 실행되는지, 지우기가 되는지 확인한다.
+  installer:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      GITBELL_LANG: en
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install 0.5.3 with npx (the version people have now)
+        if: runner.os != 'Linux'
+        run: npx -y gitbell@0.5.3
+      - name: Install the released app with the installer
+        run: node -e "require('./bin/gitbell.js').install({ version: '0.6.0' })"
+      - name: Check (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          test -d ~/Applications/GitBell.app/Contents/MacOS
+          plutil -extract CFBundleShortVersionString raw ~/Applications/GitBell.app/Contents/Info.plist | grep -x 0.6.0
+          sleep 5 && pgrep -x GitBell
+      - name: Check (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\GitBell'
+          if (-not (Test-Path "$dir\GitBell.exe")) { throw 'GitBell.exe is missing' }
+          if (Test-Path "$dir\windows") { throw 'the 0.5.x install was not removed' }
+          if (Test-Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\GitBell') { throw 'the 0.5.x uninstall entry is still there' }
+          if (-not (Test-Path (Join-Path $env:APPDATA 'GitBell'))) { throw 'settings from 0.5.x should be kept' }
+          Start-Sleep -Seconds 5
+          if (-not (Get-Process -Name GitBell -ErrorAction SilentlyContinue)) { throw 'GitBell is not running' }
+      - name: Check (Linux)
+        if: runner.os == 'Linux'
+        run: test -x ~/Applications/GitBell.AppImage && test -f ~/.local/share/applications/gitbell.desktop
+      - name: Uninstall
+        run: node bin/gitbell.js uninstall --purge
+      - name: Check it is gone
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then ! test -e ~/Applications/GitBell.app; fi
+          if [ "$RUNNER_OS" = Linux ]; then ! test -e ~/Applications/GitBell.AppImage; fi
+          if [ "$RUNNER_OS" = Windows ]; then ! test -e "$LOCALAPPDATA/Programs/GitBell/GitBell.exe"; ! test -e "$APPDATA/GitBell"; fi

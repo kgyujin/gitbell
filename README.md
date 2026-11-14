@@ -31,7 +31,13 @@ GitBell shows new **pull requests, reviews, comments, merges and commits** from 
 
 ## Install
 
-Download the installer for your system from [Releases](https://github.com/kgyujin/gitbell/releases/latest) and run it. No Node.js or build tools needed.
+If you have Node.js, install with one command. It downloads the right installer for your system, installs it and starts GitBell, with no signing warning on first launch.
+
+```bash
+npx gitbell
+```
+
+Without Node.js, download the installer for your system from [Releases](https://github.com/kgyujin/gitbell/releases/latest) and run it.
 
 | System | File |
 | --- | --- |
@@ -40,7 +46,7 @@ Download the installer for your system from [Releases](https://github.com/kgyuji
 | Linux | `.AppImage` or `.deb` |
 
 > [!IMPORTANT]
-> The installers aren't code-signed, so your system warns you the first time you open GitBell. Allow it once as shown below and it opens normally after that.
+> The installers aren't code-signed, so when you download one in a browser your system warns you the first time you open GitBell. Allow it once as shown below and it opens normally after that.
 
 ### macOS
 
@@ -68,7 +74,7 @@ sudo apt install ./GitBell-*.deb                       # Debian, Ubuntu
 On GNOME, the tray icon needs the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/). Some desktops ignore a left click on tray icons; use **Open GitBell** from the icon's menu instead.
 
 > [!NOTE]
-> If you installed GitBell with `npx gitbell` before, remove it first with `npx gitbell uninstall`, then use the new installer. On Windows your settings and history carry over. On macOS the old SwiftUI app stored them differently, so GitBell starts fresh and you need to paste your token again (nothing to do if you use GitHub CLI).
+> On 0.5.x? Update with `npx gitbell@latest`; it removes the old install and sets up the new app. On Windows your settings and history carry over. On macOS the old SwiftUI app stored them differently, so GitBell starts fresh and you need to paste your token again (nothing to do if you use GitHub CLI).
 
 ### Connect GitHub
 
@@ -170,9 +176,15 @@ GitBell checks every few minutes (1, 2, 5, 10 or 15; default 2) and tries hard n
 
 ## Update and uninstall
 
+```bash
+npx gitbell@latest                  # update
+npx gitbell uninstall               # remove the app, keep settings
+npx gitbell uninstall --purge       # also remove settings, history and the saved token
+```
+
 When a new version is out, a banner appears at the top of the panel, plus a notification if notifications are on. Click it to open the download page; installing the new version keeps your settings and history.
 
-To uninstall, use your system's usual way. Settings and history are kept; delete the folder below to remove them too.
+Without Node.js, uninstall your system's usual way. Settings and history are kept; delete the folder below to remove them too.
 
 | System | Uninstall | Settings, history, saved token |
 | --- | --- | --- |

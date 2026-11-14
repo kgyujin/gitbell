@@ -1,17 +1,41 @@
 {
   "name": "gitbell",
   "productName": "GitBell",
-  "version": "0.6.0",
-  "private": true,
+  "version": "0.6.1",
   "description": "GitHub activity in your menu bar or system tray: pull requests, reviews, merges and commits across all your repositories.",
   "homepage": "https://github.com/kgyujin/gitbell#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kgyujin/gitbell.git"
   },
+  "bugs": "https://github.com/kgyujin/gitbell/issues",
+  "keywords": [
+    "github",
+    "notifications",
+    "menu-bar",
+    "system-tray",
+    "macos",
+    "windows",
+    "linux",
+    "pull-requests",
+    "electron"
+  ],
   "author": "kgyujin <noreply@github.com>",
   "main": "src/main.js",
   "license": "MIT",
+  "bin": {
+    "gitbell": "bin/gitbell.js"
+  },
+  "files": [
+    "bin",
+    "assets/icon.png",
+    "README.md",
+    "README.ko.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "start": "electron .",
     "demo": "electron . --demo --show",
@@ -68,6 +92,7 @@
     "nsis": {
       "oneClick": true,
       "perMachine": false,
+      "buildUniversalInstaller": false,
       "deleteAppDataOnUninstall": false
     },
     "linux": {
