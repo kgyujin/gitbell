@@ -1,54 +1,21 @@
 {
-  "name": "gitbell",
+  "name": "gitbell-windows",
+  "productName": "GitBell",
   "version": "0.5.3",
-  "description": "GitHub activity in your Mac menu bar or Windows system tray: pull requests, reviews, merges and commits across all your repositories.",
-  "keywords": [
-    "github",
-    "notifications",
-    "menu-bar",
-    "system-tray",
-    "macos",
-    "windows",
-    "pull-requests",
-    "swiftui",
-    "electron"
-  ],
-  "homepage": "https://github.com/kgyujin/gitbell#readme",
-  "bugs": "https://github.com/kgyujin/gitbell/issues",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kgyujin/gitbell.git"
-  },
+  "private": true,
+  "description": "GitBell for Windows: GitHub activity in the system tray.",
+  "main": "src/main.js",
   "license": "MIT",
-  "author": "kgyujin",
-  "bin": {
-    "gitbell": "bin/gitbell.js"
-  },
-  "files": [
-    "bin",
-    "Sources",
-    "Tests",
-    "Resources",
-    "windows/package.json",
-    "windows/package-lock.json",
-    "windows/src",
-    "windows/assets",
-    "scripts",
-    "Package.swift",
-    "README.md",
-    "README.ko.md",
-    "LICENSE"
-  ],
-  "os": [
-    "darwin",
-    "win32"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
   "scripts": {
-    "build": "scripts/build-app.sh",
-    "test": "swift test",
-    "test:windows": "npm --prefix windows test"
+    "start": "electron .",
+    "demo": "electron . --demo --show",
+    "test": "node --test test/unit/*.test.js",
+    "test:e2e": "node --test --test-concurrency=1 --test-timeout=120000 test/e2e/*.test.js"
+  },
+  "dependencies": {
+    "electron": "44.9.3"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
   }
 }

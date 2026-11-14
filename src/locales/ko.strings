@@ -1,0 +1,200 @@
+/* GitBell 한국어 문구. 키는 영어 원문이다. */
+
+/* 패널 위쪽 */
+"Mark all as read" = "모두 읽음";
+"Refresh" = "새로고침";
+"Settings" = "설정";
+
+/* 필터 */
+"All" = "전체";
+"PRs" = "PR";
+"Reviews" = "리뷰";
+"Commits" = "커밋";
+
+/* 저장소·정렬·검색 */
+"Unread" = "안 읽음";
+"Read" = "읽음";
+"All repositories" = "모든 저장소";
+"Newest" = "최신순";
+"By repository" = "저장소별";
+"Unread first" = "안 읽은 것 먼저";
+"Reset" = "초기화";
+"%lld items" = "%lld개";
+"Search" = "검색";
+"Search title, repository, person, #number" = "제목, 저장소, 사람, #번호로 찾기";
+"Mark as read" = "읽음 표시";
+"Nothing matches these filters" = "조건에 맞는 활동이 없습니다";
+"Reset filters" = "필터 초기화";
+
+/* 0.4.0: 내 PR, 단축키 */
+"Mine" = "내 PR";
+"Show only others' activity on pull requests you opened. Notifications aren't affected." = "목록에서 내가 올린 PR에 다른 사람이 한 활동만 봅니다. 알림에는 영향이 없습니다.";
+"Notify only for my pull requests" = "내 PR 소식만 알림";
+"Reviews, comments, merges and pushes on PRs you opened. The list isn't affected." = "내가 올린 PR의 리뷰, 댓글, 머지, push만 알립니다. 목록에는 영향이 없습니다.";
+"Search (⌘F)" = "검색 (⌘F)";
+"Refresh (⌘R)" = "새로고침 (⌘R)";
+"Settings (⌘,)" = "설정 (⌘,)";
+"Mark everything shown as read" = "보이는 항목 모두 읽음";
+
+/* 우클릭 메뉴·새 버전 */
+"Open in browser" = "브라우저에서 열기";
+"Copy link" = "링크 복사";
+"Mark as unread" = "안 읽음으로 표시";
+"Show only %@" = "%@만 보기";
+"Hide %@" = "%@ 숨기기";
+"Hide this repository" = "이 저장소 숨기기";
+"GitBell %@ is available" = "GitBell %@ 새 버전이 나왔습니다";
+"%@ available" = "%@ 나옴";
+
+/* 설정: 알림 */
+"Notifications" = "알림";
+"Notify me" = "알림 받기";
+"Play sound" = "소리 내기";
+"Notify about" = "알림 받을 활동";
+"New pull requests" = "새 PR";
+"When someone opens a pull request" = "누군가 PR을 올렸을 때";
+"Merged or closed" = "머지·닫힘";
+"When a pull request is merged or closed" = "PR이 머지되거나 닫혔을 때";
+"Approvals, change requests and review notes" = "승인, 수정 요청, 리뷰 의견";
+"Comments" = "댓글";
+"Comments on pull requests and issues" = "PR과 이슈에 달린 댓글";
+"Pushes, force pushes and new branches" = "push, 강제 push, 새 브랜치";
+"macOS notifications are allowed" = "macOS 알림이 허용되어 있습니다";
+"Notifications are turned off in macOS" = "macOS에서 알림이 꺼져 있습니다";
+"Open System Settings" = "시스템 설정 열기";
+"GitBell hasn't asked for permission yet" = "아직 알림 권한을 요청하지 않았습니다";
+"Allow" = "허용하기";
+"Send test" = "테스트 알림";
+"Test notification" = "테스트 알림";
+"Notifications are working. Click to open GitHub." = "알림이 잘 옵니다. 누르면 GitHub이 열립니다.";
+
+/* 설정: 목록 */
+"List" = "목록";
+"Hide bot activity" = "봇 활동 숨기기";
+"Accounts ending in [bot], like CI or review bots" = "CI·리뷰 봇처럼 이름이 [bot]으로 끝나는 계정";
+"Show unread count in menu bar" = "메뉴 막대에 안 읽은 수 표시";
+"Hidden repositories" = "숨긴 저장소";
+"Right-click an item to hide its repository." = "항목을 우클릭하면 그 저장소를 숨길 수 있습니다.";
+"Show" = "다시 보이기";
+"On" = "켜짐";
+"Off" = "꺼짐";
+
+/* 활동 종류 */
+"Opened" = "PR 올라옴";
+"Merged" = "머지됨";
+"Closed" = "닫힘";
+"Approved" = "승인";
+"Changes requested" = "수정 요청";
+"Reviewed" = "리뷰";
+"Commented" = "댓글";
+"Pushed" = "push";
+"Pushed %lld commits" = "커밋 %lld개 push";
+"Force-pushed" = "강제 push";
+"New branch" = "새 브랜치";
+"Issue #%lld" = "이슈 #%lld";
+"bot" = "봇";
+
+/* 시간 */
+"now" = "방금";
+"Today" = "오늘";
+"Yesterday" = "어제";
+
+/* 목록 상태 */
+"Loading your GitHub activity…" = "GitHub 활동을 불러오는 중…";
+"No activity yet" = "아직 활동이 없습니다";
+"New pull requests, reviews, merges and commits will show up here." = "새 PR, 리뷰, 머지, 커밋이 생기면 여기에 뜹니다.";
+"Checking…" = "확인 중…";
+"Checked %@ · %lld repositories" = "%@ 확인 · 저장소 %lld개";
+"Open GitHub" = "GitHub 열기";
+
+/* 문제 */
+"Your GitHub token is invalid or expired. Update it in Settings." = "GitHub 토큰이 잘못됐거나 만료됐습니다. 설정에서 바꿔 주세요.";
+"Couldn't reach GitHub." = "GitHub에 연결하지 못했습니다.";
+"GitHub's API limit was reached. GitBell will check again after %@." = "GitHub API 한도에 걸렸습니다. %@ 이후에 다시 확인합니다.";
+"GitHub's API limit was reached. GitBell will check again later." = "GitHub API 한도에 걸렸습니다. 잠시 뒤 다시 확인합니다.";
+"This token can't read your GitHub notifications, so only repositories with recent pushes are checked. Use GitHub CLI or a classic token." = "이 토큰으로는 GitHub 알림함을 읽을 수 없어 최근 push가 있는 저장소만 확인합니다. GitHub CLI나 classic 토큰을 쓰세요.";
+"Couldn't read %lld repositories:" = "저장소 %lld개를 읽지 못했습니다:";
+
+/* 알림 */
+"%lld new activities" = "새 활동 %lld개";
+
+/* 설정 */
+"Back" = "뒤로";
+"Account" = "계정";
+"General" = "일반";
+"Check every" = "확인 간격";
+"%lld unread" = "안 읽음 %lld개";
+"Clear search" = "검색어 지우기";
+"Search activity" = "활동 검색";
+"Personal access token" = "개인 액세스 토큰";
+"Repository: %@" = "저장소: %@";
+"Sort: %@" = "정렬: %@";
+"%lld min" = "%lld분";
+"Show notifications" = "알림 표시";
+"Include my own activity" = "내 활동도 표시";
+"Open at login" = "로그인 시 자동 실행";
+"Allow GitBell in System Settings → General → Login Items." = "시스템 설정 → 일반 → 로그인 항목에서 GitBell을 허용하세요.";
+"Open Login Items" = "로그인 항목 열기";
+"Quit GitBell" = "GitBell 종료";
+"Connected with GitHub CLI" = "GitHub CLI로 연결됨";
+"Connected with a personal access token" = "개인 액세스 토큰으로 연결됨";
+"Not connected" = "연결 안 됨";
+"Remove saved token" = "저장한 토큰 지우기";
+"Save" = "저장";
+"Couldn't save the token. Try again." = "토큰을 저장하지 못했습니다. 다시 시도하세요.";
+"Create a token on GitHub (repo, notifications, read:org)" = "GitHub에서 토큰 만들기 (repo, notifications, read:org)";
+
+/* 처음 연결 */
+"Connect your GitHub account" = "GitHub 계정 연결";
+"GitBell reads your repositories and notifications to show pull requests, reviews, merges and commits." = "내 저장소와 알림을 읽어 PR, 리뷰, 머지, 커밋을 보여 줍니다.";
+"Already use GitHub CLI?" = "GitHub CLI를 쓰고 있다면";
+"Run this in Terminal, then check again." = "터미널에서 아래 명령을 실행한 뒤 '다시 확인'을 누르세요.";
+"Check again" = "다시 확인";
+"Or paste a personal access token" = "또는 개인 액세스 토큰 붙여넣기";
+"Your token is stored only in the macOS Keychain on this Mac." = "토큰은 이 Mac의 키체인에만 저장됩니다.";
+
+/* 영어 단수형(개수가 1일 때). 한국어는 복수형과 같은 번역을 쓴다. */
+"Pushed %lld commit" = "커밋 %lld개 push";
+"%lld item" = "%lld개";
+"Checked %@ · %lld repository" = "%@ 확인 · 저장소 %lld개";
+"Couldn't read %lld repository:" = "저장소 %lld개를 읽지 못했습니다:";
+"%lld new activity" = "새 활동 %lld개";
+
+/* 만료된 토큰 다시 연결 */
+"The GitHub CLI login has expired." = "GitHub CLI 로그인이 만료됐습니다.";
+"The saved token is invalid or expired." = "저장한 토큰이 잘못됐거나 만료됐습니다.";
+"Run gh auth login again, or paste a new token below." = "gh auth login을 다시 실행하거나, 아래에 새 토큰을 붙여넣으세요.";
+"Paste a new token below." = "아래에 새 토큰을 붙여넣으세요.";
+"Open Settings" = "설정 열기";
+
+/* 읽음 표시 되돌리기 */
+"Marked %lld items as read" = "%lld개를 읽음으로 표시했습니다";
+"Marked %lld item as read" = "%lld개를 읽음으로 표시했습니다";
+"Undo" = "되돌리기";
+
+/* 키는 영어 원문이다. */
+
+/* 단축키 */
+"Search (Ctrl+F)" = "검색 (Ctrl+F)";
+"Refresh (Ctrl+R)" = "새로고침 (Ctrl+R)";
+"Settings (Ctrl+,)" = "설정 (Ctrl+,)";
+
+/* 트레이 */
+"Open GitBell" = "GitBell 열기";
+"Show unread count on the tray icon" = "트레이 아이콘에 안 읽은 수 표시";
+
+/* 알림 */
+"Banner style follows your system settings" = "배너 모양은 시스템 설정을 따릅니다";
+"Open system settings" = "시스템 설정 열기";
+
+/* 연결 */
+"Run this in a terminal, then check again." = "터미널에서 아래 명령을 실행한 뒤 '다시 확인'을 누르세요.";
+"Your token is encrypted by your operating system and stored only on this computer." = "토큰은 운영체제가 암호화해 이 컴퓨터에만 저장합니다.";
+
+/* 새 버전 */
+"Download" = "내려받기";
+"Click to open the download page." = "누르면 내려받기 페이지를 엽니다.";
+
+/* 네트워크 오류(Node fetch는 영어로만 알려 줘서 흔한 경우를 번역한다) */
+"The request timed out." = "요청 시간이 지났습니다.";
+"You appear to be offline." = "인터넷에 연결되어 있지 않은 것 같습니다.";
