@@ -34,7 +34,7 @@ test('데모 패널: 목록·필터·검색·정렬·우클릭·설정', async (
   await window.getByRole('button', { name: 'Mine', exact: true }).click();
 
   // 검색(Ctrl+F)은 한 글자씩 쳐도 입력칸을 다시 그리지 않는다.
-  await window.keyboard.press('Control+f');
+  await window.keyboard.press('ControlOrMeta+f');
   const search = window.locator('#searchInput');
   await search.waitFor({ state: 'visible' });
   await search.pressSequentially('contrast', { delay: 20 });
@@ -62,7 +62,7 @@ test('데모 패널: 목록·필터·검색·정렬·우클릭·설정', async (
   await window.waitForFunction(() => !document.querySelector('[data-section="repository:acme/design-system"]'));
   assert.equal(await rows(window).count(), 6);
 
-  await window.keyboard.press('Control+,');
+  await window.keyboard.press('ControlOrMeta+,');
   await window.waitForSelector('#settings:not([hidden])');
   await screenshot(window, 'demo-settings');
   assert.ok(await window.locator('.hidden-repo', { hasText: 'acme/design-system' }).isVisible());
@@ -119,7 +119,7 @@ test('데모 패널: 한국어와 어두운 테마', async (t) => {
   assert.ok(await window.getByText('승인', { exact: true }).isVisible());
   assert.ok(await window.getByText('커밋 3개 push').isVisible());
   await screenshot(window, 'demo-ko-dark');
-  await window.keyboard.press('Control+,');
+  await window.keyboard.press('ControlOrMeta+,');
   await window.waitForSelector('#settings:not([hidden])');
   assert.ok(await window.getByText('트레이 아이콘에 안 읽은 수 표시').isVisible());
   await screenshot(window, 'demo-ko-settings');
@@ -208,7 +208,7 @@ test('데모 패널: 열지 않고 읽음 표시·묶음 읽음·되돌리기', 
 
   // Ctrl+Z로 되돌린다.
   await window.locator('.row-item').first().focus();
-  await window.keyboard.press('Control+z');
+  await window.keyboard.press('ControlOrMeta+z');
   await window.waitForFunction(() => document.querySelector('.header .count-badge')?.textContent === '2');
   assert.equal(await window.locator('.undo-bar').count(), 0);
 
@@ -287,7 +287,7 @@ test('데모 패널: Ctrl+F 뒤 바로 친 글자가 검색칸에 들어간다',
   t.after(() => app.close());
   await window.waitForSelector('.row-item');
   // 예전에는 검색칸이 보이기 전에 초점을 주어 실패해서, 바로 친 글자가 사라졌다.
-  await window.keyboard.press('Control+f');
+  await window.keyboard.press('ControlOrMeta+f');
   await window.keyboard.type('contrast');
   await window.waitForFunction(() => document.querySelector('#searchInput').value === 'contrast');
   await window.waitForFunction(() => document.querySelectorAll('.row-item').length === 2);
@@ -322,13 +322,13 @@ test('데모 패널: 키보드 초점은 동작 뒤에도 사라지지 않는다
 
   // 설정을 열면 '뒤로'로, Esc로 닫으면 위쪽 '설정' 단추로 간다.
   await window.locator('.row-item').first().focus();
-  await window.keyboard.press('Control+,'); await settle();
+  await window.keyboard.press('ControlOrMeta+,'); await settle();
   assert.equal(await focused(), 'Back');
   await window.keyboard.press('Escape'); await settle();
   assert.match(await focused(), /^Settings/);
 
   // 검색칸을 Esc로 닫으면 검색 단추로 간다.
-  await window.keyboard.press('Control+f'); await settle();
+  await window.keyboard.press('ControlOrMeta+f'); await settle();
   await window.keyboard.press('Escape'); await settle();
   assert.match(await focused(), /^Search/);
 

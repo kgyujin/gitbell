@@ -85,7 +85,7 @@ test('연결부터 새 활동까지', async (t) => {
 
   // 새 push가 생기면 안 읽음으로 들어온다(Ctrl+R).
   github.server.routes = routes({ withNewPush: true });
-  await window.keyboard.press('Control+r');
+  await window.keyboard.press('ControlOrMeta+r');
   await window.waitForSelector('.row-item.unread');
   assert.equal(await window.locator('.header .count-badge').textContent(), '1');
   assert.ok(await window.getByText('feat: brand new push').isVisible());
@@ -93,7 +93,7 @@ test('연결부터 새 활동까지', async (t) => {
   await screenshot(window, 'flow-new-activity');
 
   // 설정: 저장한 토큰으로 연결됨
-  await window.keyboard.press('Control+,');
+  await window.keyboard.press('ControlOrMeta+,');
   assert.ok(await window.getByText('Connected with a personal access token · @me').isVisible());
   assert.equal(await window.locator('.segment.selected').textContent(), '2 min', '기본 확인 간격');
   await window.getByRole('radio', { name: '5 min', exact: true }).click();

@@ -4,11 +4,12 @@
 
 # GitBell
 
-_Your GitHub activity, one click away in the Mac menu bar or the Windows system tray._
+_Your GitHub activity, one click away in the Mac menu bar or the Windows and Linux system tray._
 
-[![npm](https://img.shields.io/npm/v/gitbell?logo=npm)](https://www.npmjs.com/package/gitbell)
+[![Release](https://img.shields.io/github/v/release/kgyujin/gitbell?logo=github)](https://github.com/kgyujin/gitbell/releases/latest)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black?logo=apple)](#macos)
 [![Windows 10+](https://img.shields.io/badge/Windows-10%2B-0078D4?logo=windows)](#windows)
+[![Linux](https://img.shields.io/badge/Linux-AppImage%20%C2%B7%20deb-FCC624?logo=linux&logoColor=black)](#linux)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [Install](#install) · [Features](#features) · [Tips](#tips) · [How it checks GitHub](#how-it-checks-github) · [FAQ](#faq) · [한국어](README.ko.md)
@@ -30,29 +31,44 @@ GitBell shows new **pull requests, reviews, comments, merges and commits** from 
 
 ## Install
 
+Download the installer for your system from [Releases](https://github.com/kgyujin/gitbell/releases/latest) and run it. No Node.js or build tools needed.
+
+| System | File |
+| --- | --- |
+| macOS 13 or later (Apple silicon and Intel) | `.dmg` |
+| Windows 10 or later | `.exe` |
+| Linux | `.AppImage` or `.deb` |
+
+> [!IMPORTANT]
+> The installers aren't code-signed, so your system warns you the first time you open GitBell. Allow it once as shown below and it opens normally after that.
+
 ### macOS
 
+Open the `.dmg`, drag GitBell into **Applications**, and start it. Click the bell in the menu bar.
+
+If macOS says it can't verify the app, go to **System Settings → Privacy & Security** and click **Open Anyway**. Or run this in Terminal:
+
 ```bash
-npx gitbell
+xattr -dr com.apple.quarantine /Applications/GitBell.app
 ```
-
-GitBell builds on your Mac, installs to `~/Applications`, and starts. Click the bell in the menu bar.
-
-> [!NOTE]
-> Needs macOS 13 or later, Node.js 18+, and the Xcode command line tools with Swift 5.10 or later (`xcode-select --install`). Because the app is built on your own Mac, macOS opens it without the "unidentified developer" warning.
 
 ### Windows
 
-Run the same command in PowerShell or Command Prompt. If PowerShell says running scripts is disabled, run `npx.cmd gitbell` instead.
+Run the `.exe`; GitBell installs and starts. Click the bell in the system tray next to the clock. If you don't see it, open the **^** overflow menu and drag the bell onto the taskbar.
 
-```powershell
-npx gitbell
+If "Windows protected your PC" appears, click **More info → Run anyway**.
+
+### Linux
+
+```bash
+chmod +x GitBell-*.AppImage && ./GitBell-*.AppImage   # AppImage
+sudo apt install ./GitBell-*.deb                       # Debian, Ubuntu
 ```
 
-GitBell installs to `%LOCALAPPDATA%\Programs\GitBell`, adds a Start menu shortcut, and starts. Click the bell in the system tray next to the clock. If you don't see it, open the **^** overflow menu and drag the bell onto the taskbar.
+On GNOME, the tray icon needs the [AppIndicator extension](https://extensions.gnome.org/extension/615/appindicator-support/). Some desktops ignore a left click on tray icons; use **Open GitBell** from the icon's menu instead.
 
 > [!NOTE]
-> Needs Windows 10 or later and Node.js 22.12+. The first install downloads Electron (about 100 MB). Your token is encrypted for your Windows account and stays on this PC; settings and history live in `%APPDATA%\GitBell`.
+> If you installed GitBell with `npx gitbell` before, remove it first with `npx gitbell uninstall`, then use the new installer. On Windows your settings and history carry over. On macOS the old SwiftUI app stored them differently, so GitBell starts fresh and you need to paste your token again (nothing to do if you use GitHub CLI).
 
 ### Connect GitHub
 
@@ -105,7 +121,7 @@ Otherwise, paste a [personal access token](https://github.com/settings/tokens/ne
 <tr>
 <td width="50%" valign="top">
 
-**Undo and updates.** Marked a whole group as read by mistake? Undo it with <kbd>⌘</kbd> <kbd>Z</kbd> / <kbd>Ctrl</kbd> <kbd>Z</kbd>. A banner tells you when a new version is out and copies the update command.
+**Undo and updates.** Marked a whole group as read by mistake? Undo it with <kbd>⌘</kbd> <kbd>Z</kbd> / <kbd>Ctrl</kbd> <kbd>Z</kbd>. A banner tells you when a new version is out and opens the download page.
 
 </td>
 <td width="50%" valign="top">
@@ -119,6 +135,10 @@ Otherwise, paste a [personal access token](https://github.com/settings/tokens/ne
 <td><img src="docs/readme/windows-repos-en.png" alt="Repository menu with unread and total counts" width="380"></td>
 </tr>
 </table>
+
+**Read state in sync with GitHub.** PRs and issues you read on GitHub turn read in GitBell, and once you've read all of a PR's or issue's activity in GitBell, its GitHub notification is marked read too. Activity with no GitHub notification, like pushes, is tracked on this computer only.
+
+**Activity chart.** The chart button in the header shows the last 7 days of activity by day (PRs, reviews, commits) and your most active repositories.
 
 GitBell follows your system's light or dark appearance and language (English or Korean), and works with the keyboard and screen readers (VoiceOver, Narrator).
 
@@ -140,23 +160,25 @@ GitBell checks every few minutes (1, 2, 5, 10 or 15; default 2) and tries hard n
 
 - **Only what changed.** A repository is read right away when it gets a push or a notification. Quiet repositories are checked again every 15 minutes.
 - **Conditional requests.** Unchanged responses come back as `304 Not Modified`, which GitHub doesn't count against your limit.
+- **Batched reads.** Reviews for all changed PRs come from a single GraphQL query instead of one request per PR. GraphQL has its own limit, separate from REST.
+- **Rests when offline.** With no internet connection GitBell sends nothing, and checks right away when you're back online.
 - **Backs off.** When few requests are left, GitBell skips optional work; when the limit is reached, it waits until it resets.
 - **Nothing lost.** If a repository can't be read for a moment, the next check picks up from where it failed.
 
 > [!NOTE]
-> GitBell talks only to GitHub, plus npm once an hour to check for updates. Your token stays on your computer: in the macOS Keychain, or encrypted for your Windows account.
+> GitBell talks only to GitHub (it also checks GitHub Releases once an hour for updates). Your token is encrypted with your system's protection (macOS Keychain, Windows DPAPI, the Linux secret store) and stays on this computer.
 
 ## Update and uninstall
 
-```bash
-npx gitbell@latest                  # update
-npx gitbell uninstall               # remove the app, keep settings
-npx gitbell uninstall --purge       # also remove settings, history and the saved token
-```
+When a new version is out, a banner appears at the top of the panel, plus a notification if notifications are on. Click it to open the download page; installing the new version keeps your settings and history.
 
-When a new version is out, a banner appears at the top of the panel, plus a notification if notifications are on. Click it to copy the update command.
+To uninstall, use your system's usual way. Settings and history are kept; delete the folder below to remove them too.
 
-On Windows you can also remove GitBell like any other app: **Settings → Apps → Installed apps → GitBell → Uninstall**, or right-click the tray icon and choose **Uninstall GitBell…**. Tick the box in the dialog to delete your settings and saved token too.
+| System | Uninstall | Settings, history, saved token |
+| --- | --- | --- |
+| macOS | Move GitBell from Applications to the Trash | `~/Library/Application Support/GitBell` |
+| Windows | **Settings → Apps → Installed apps → GitBell → Uninstall** | `%APPDATA%\GitBell` |
+| Linux | Delete the AppImage, or `sudo apt remove gitbell` | `~/.config/GitBell` |
 
 ## FAQ
 
@@ -173,7 +195,7 @@ For organizations that use SAML single sign-on, authorize your token for the org
 
 Open **Settings → Notifications** in GitBell and press **Send test**. If nothing appears, open **System Settings → Notifications → GitBell**, allow notifications, and choose **Banners** or **Alerts**. Focus modes also hide banners.
 
-On Windows, use **Settings → Notifications → Open Windows settings** and check that GitBell notifications are on. Do not disturb (Focus assist) also hides banners.
+On Windows, use **Settings → Notifications → Open system settings** and check that GitBell notifications are on. Do not disturb (Focus assist) also hides banners.
 </details>
 
 <details>
@@ -185,17 +207,15 @@ Pushes and anything that reaches your GitHub notifications appear on the next ch
 <details>
 <summary><b>How do I build it from source?</b></summary>
 
+Every system runs the same Electron app. You need Node.js 22 or later.
+
 ```bash
 git clone https://github.com/kgyujin/gitbell && cd gitbell
-swift test && scripts/build-app.sh   # creates dist/GitBell.app
-```
-
-The Windows version is the Electron app in `windows/`.
-
-```bash
-cd windows && npm install
+npm install
+npm start           # run it
+npm run demo        # open the panel with sample data
 npm test            # unit tests
 npm run test:e2e    # tests that launch the app
-npm run demo        # open the panel with sample data
+npm run dist        # build this system's installer into dist/
 ```
 </details>

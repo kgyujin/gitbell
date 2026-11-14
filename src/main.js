@@ -7,7 +7,6 @@
 //   --show   시작하자마자 패널을 연다
 'use strict';
 
-const fs = require('node:fs');
 const path = require('node:path');
 const {
   app, BrowserWindow, Tray, Menu, Notification, nativeImage, nativeTheme, ipcMain, shell, clipboard, safeStorage,

@@ -1,21 +1,83 @@
 {
-  "name": "gitbell-windows",
+  "name": "gitbell",
   "productName": "GitBell",
-  "version": "0.5.3",
+  "version": "0.6.0",
   "private": true,
-  "description": "GitBell for Windows: GitHub activity in the system tray.",
+  "description": "GitHub activity in your menu bar or system tray: pull requests, reviews, merges and commits across all your repositories.",
+  "homepage": "https://github.com/kgyujin/gitbell#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kgyujin/gitbell.git"
+  },
+  "author": "kgyujin <noreply@github.com>",
   "main": "src/main.js",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
     "demo": "electron . --demo --show",
     "test": "node --test test/unit/*.test.js",
-    "test:e2e": "node --test --test-concurrency=1 --test-timeout=120000 test/e2e/*.test.js"
-  },
-  "dependencies": {
-    "electron": "44.9.3"
+    "test:e2e": "node --test --test-concurrency=1 --test-timeout=120000 test/e2e/*.test.js",
+    "dist": "electron-builder --publish never"
   },
   "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.18.0",
     "playwright": "1.63.0"
+  },
+  "build": {
+    "appId": "io.github.kgyujin.gitbell",
+    "productName": "GitBell",
+    "artifactName": "GitBell-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "src/**",
+      "assets/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "extendInfo": {
+        "LSUIElement": true
+      }
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "assets/icon.png",
+      "category": "Development",
+      "maintainer": "kgyujin"
+    }
   }
 }
