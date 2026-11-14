@@ -31,7 +31,13 @@ _GitHub 활동을 Mac 메뉴 막대나 Windows·Linux 트레이에서 바로 봅
 
 ## 설치
 
-[Releases](https://github.com/kgyujin/gitbell/releases/latest)에서 내 OS에 맞는 설치 파일을 받아 실행합니다. Node.js나 빌드 도구는 필요 없습니다.
+Node.js가 있다면 터미널에서 한 줄로 설치합니다. 내 OS에 맞는 설치 파일을 받아 설치하고 바로 실행합니다. 이 방법은 처음 열 때 서명 경고도 뜨지 않습니다.
+
+```bash
+npx gitbell
+```
+
+Node.js가 없다면 [Releases](https://github.com/kgyujin/gitbell/releases/latest)에서 내 OS에 맞는 설치 파일을 받아 실행합니다.
 
 | OS | 받을 파일 |
 | --- | --- |
@@ -40,7 +46,7 @@ _GitHub 활동을 Mac 메뉴 막대나 Windows·Linux 트레이에서 바로 봅
 | Linux | `.AppImage` 또는 `.deb` |
 
 > [!IMPORTANT]
-> 설치 파일에는 코드 서명이 없어서 처음 열 때 OS가 경고합니다. 아래처럼 한 번만 허용하면 다음부터는 그대로 열립니다.
+> 설치 파일에는 코드 서명이 없어서, 브라우저로 받아 처음 열 때 OS가 경고합니다. 아래처럼 한 번만 허용하면 다음부터는 그대로 열립니다.
 
 ### macOS
 
@@ -68,7 +74,7 @@ sudo apt install ./GitBell-*.deb                       # Debian·Ubuntu
 GNOME에서는 트레이 아이콘을 보려면 [AppIndicator 확장](https://extensions.gnome.org/extension/615/appindicator-support/)이 필요합니다. 일부 데스크톱 환경은 트레이 아이콘을 왼쪽 클릭해도 반응하지 않습니다. 그때는 아이콘 메뉴의 **GitBell 열기**를 누르세요.
 
 > [!NOTE]
-> 예전에 `npx gitbell`로 설치했다면 먼저 `npx gitbell uninstall`로 지운 뒤 새 설치 파일을 쓰세요. Windows는 설정과 기록이 그대로 이어집니다. macOS는 예전 앱(SwiftUI)과 저장 방식이 달라 처음 실행처럼 다시 채우고, 앱에 넣었던 토큰도 다시 넣어야 합니다(GitHub CLI를 쓰면 할 일이 없습니다).
+> 0.5.x를 쓰고 있다면 `npx gitbell@latest`로 업데이트하세요. 예전 설치본을 정리하고 새 앱을 설치합니다. Windows는 설정과 기록이 그대로 이어집니다. macOS는 예전 앱(SwiftUI)과 저장 방식이 달라 처음 실행처럼 다시 채우고, 앱에 넣었던 토큰도 다시 넣어야 합니다(GitHub CLI를 쓰면 할 일이 없습니다).
 
 ### GitHub 연결
 
@@ -170,9 +176,15 @@ GitBell은 몇 분마다(1·2·5·10·15분, 기본 2분) 확인하면서 [API �
 
 ## 업데이트와 지우기
 
+```bash
+npx gitbell@latest                  # 업데이트
+npx gitbell uninstall               # 앱만 지우고 설정은 남기기
+npx gitbell uninstall --purge       # 설정, 기록, 저장한 토큰까지 지우기
+```
+
 새 버전이 나오면 패널 위쪽 띠로, 알림을 켜 두었다면 알림으로도 알려 줍니다. 누르면 내려받기 페이지가 열리고, 새 설치 파일로 설치하면 설정과 기록은 그대로 이어집니다.
 
-지울 때는 각 OS의 방법을 따릅니다. 설정과 기록은 남으니, 모두 지우려면 아래 폴더도 지우세요.
+Node.js 없이 지울 때는 각 OS의 방법을 따릅니다. 설정과 기록은 남으니, 모두 지우려면 아래 폴더도 지우세요.
 
 | OS | 지우기 | 설정·기록·저장한 토큰 |
 | --- | --- | --- |
