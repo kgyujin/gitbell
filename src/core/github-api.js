@@ -129,6 +129,22 @@ function createGitHubAPI({ token, baseURL = 'https://api.github.com/', fetch: fe
       if (cache && etag && isReusable(path)) cache.set(key, { etag, text }, token);
       return body;
     },
+    /** 본문 없는 PATCH(알림 스레드 읽음 표시 등). 성공하면 아무것도 돌려주지 않는다. */
+    async patch(path) {
+      let response;
+      try {
+        response = await fetchImpl(new URL(path, base), {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'GitBell' },
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (error) {
+        throw new GitHubError('network', error && error.message ? error.message : String(error));
+      }
+      if (response.status === 401) throw new GitHubError('unauthorized', '', 401);
+      const text = await response.text();
+      if (response.status < 200 || response.status >= 300) throw failure(response, text);
+    },
     /**
      * GraphQL 질의 하나를 보낸다. GraphQL 한도(시간당 5,000점)는 REST 한도와 따로 세므로,
      * 여러 번의 REST 호출을 한 번의 GraphQL로 묶으면 REST 한도를 아낀다. 조건부 요청(304)은 없다.

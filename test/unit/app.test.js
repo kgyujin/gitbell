@@ -22,6 +22,8 @@ const ROOT = path.resolve(__dirname, '..', '..');
 function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, savedState = null, savedSettings = null, undoMs,
   latestVersion = '0.5.0', isOnline = () => true } = {}) {
   const requested = [];
+  const patched = [];
+  let patchFails = false;
   const saved = { state: savedState, settings: savedSettings };
   const opened = [];
   const copied = [];
@@ -41,6 +43,10 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
       remove: () => { tokenValue = null; },
     },
     createAPI: () => ({
+      async patch(pathname) {
+        if (patchFails) throw new GitHubError('http', 'Forbidden', 403);
+        patched.push(pathname);
+      },
       async get(pathname) {
         requested.push(pathname);
         const key = Object.keys(routes).find((prefix) => pathname.startsWith(prefix));
@@ -78,7 +84,7 @@ function harness({ token = { value: 'tok', source: 'saved' }, routes = {}, saved
     undoMs,
     isOnline,
   });
-  return { model, saved, opened, copied, notified, dismissed, requested };
+  return { model, saved, opened, copied, notified, dismissed, requested, patched, failPatches: (on) => { patchFails = on; } };
 }
 
 const pushRoutes = (activity) => ({
@@ -672,4 +678,46 @@ test('AppModel: 오프라인이면 요청하지 않고, 다시 연결되면 바�
   model.networkOnline();
   clearTimeout(model.timer);
   assert.equal(restarted, 1, '문제가 없으면 다시 시작하지 않는다(확인이 겹치지 않게)');
+});
+
+// MARK: GitHub 읽음 동기화
+
+test('AppModel: GitHub에서 읽은 PR의 활동은 읽음이 되고, GitBell에서 읽으면 GitHub 알림도 읽음이 된다', async () => {
+  const comment = (id, number, createdAt) => ({ id, issue_url: `https://api.github.com/repos/org/repo/issues/${number}`,
+    html_url: `https://github.com/org/repo/pull/${number}#c${id}`, user: user('amy'), body: `댓글 ${id}`, created_at: createdAt });
+  const notification = (id, number, extra) => ({ id, repository: { full_name: 'org/repo' }, updated_at: '2026-11-09T05:55:00Z',
+    subject: { type: 'PullRequest', url: `https://api.github.com/repos/org/repo/pulls/${number}` }, unread: true, last_read_at: null, ...extra });
+  const routes = { ...pushRoutes([]), 'repos/org/repo/issues/comments': [], notifications: [] };
+  const { model, patched, dismissed, notified, failPatches } = harness({ routes });
+  await model.refresh();
+
+  routes['repos/org/repo/issues/comments'] = [comment(1, 5, '2026-11-09T05:50:00Z'), comment(2, 6, '2026-11-09T05:55:00Z')];
+  // #5는 GitHub에서 이미 읽었다(댓글보다 뒤에 읽음).
+  routes.notifications = [
+    notification('500', 5, { unread: false, last_read_at: '2026-11-09T05:58:00Z' }),
+    notification('600', 6),
+  ];
+  await model.refresh();
+  const unread = () => model.state.history.filter((e) => e.isUnread).map((e) => e.id);
+  assert.deepEqual(unread(), ['org/repo#ic:2'], 'GitHub에서 읽은 #5의 댓글은 읽음');
+  assert.deepEqual(notified[0].events.map((e) => e.id), ['org/repo#ic:2'], 'GitHub에서 이미 읽은 활동은 알리지 않는다');
+
+  failPatches(true);
+  model.markRead('org/repo#ic:2');
+  await model.pendingSync;
+  assert.equal(model.state.threads['org/repo#6'].unread, true, 'GitHub에 쓰지 못하면 GitHub 쪽은 안 읽음 그대로');
+
+  model.markUnread('org/repo#ic:2');
+  failPatches(false);
+  model.markRead('org/repo#ic:2');
+  await model.pendingSync;
+  assert.deepEqual(patched, ['notifications/threads/600'], 'GitBell에서 읽으면 GitHub 알림 스레드도 읽음으로');
+  assert.equal(model.state.threads['org/repo#6'].unread, false);
+  assert.ok(dismissed.some((d) => d.ids.includes('org/repo#ic:2')));
+
+  // 다음 확인에서 GitHub이 돌려준 읽은 시각은 이미 반영한 것이라, 다시 안 읽음으로 바꾼 항목을 덮어쓰지 않는다.
+  model.markUnread('org/repo#ic:2');
+  routes.notifications = [notification('600', 6, { unread: false, last_read_at: model.state.threads['org/repo#6'].lastReadAt })];
+  await model.refresh();
+  assert.deepEqual(unread(), ['org/repo#ic:2']);
 });

@@ -1,4 +1,4 @@
-// Swift 테스트(Tests/GitBellCoreTests)와 같은 모양의 GitHub 응답 자료.
+// GitHub 응답 모양의 테스트 자료.
 'use strict';
 
 const { ZERO_SHA } = require('../../src/core/event-builder');

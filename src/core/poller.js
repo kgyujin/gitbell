@@ -73,12 +73,15 @@ async function refresh(api, current, { now, includeOwn, readAll = false, config 
     if (isTemporary(error)) throw error;
     return null;
   };
+  // 읽음 동기화를 위해 안 읽은 PR·이슈 활동 중 가장 오래된 것까지 알림함을 읽는다(그 스레드의 읽음 상태를 알아야 한다).
+  const unreadThreadTimes = state.history.filter((e) => e.isUnread && WatchState.threadKey(e)).map((e) => Date.parse(e.time));
+  const notificationsSince = Math.min(sinceMs, ...unreadThreadTimes);
   const [repos, notifications] = await Promise.all([
     api.get(`user/repos?sort=pushed&direction=desc&per_page=${config.discoveryPageSize}`
       + '&affiliation=owner,collaborator,organization_member'),
     // 알림함은 1시간 단위로 맞춘 since로 읽는다. 같은 주소가 1시간 동안 반복돼 304(한도 미사용)를 받는다.
     // 넓게 읽은 앞부분은 저장소별 마지막 읽은 시각과 견줘 거른다(planRepos).
-    api.get(`notifications?all=true&since=${iso(Math.floor(sinceMs / 3600000) * 3600000)}&per_page=50`).catch(optional),
+    api.get(`notifications?all=true&since=${iso(Math.floor(notificationsSince / 3600000) * 3600000)}&per_page=50`).catch(optional),
   ]);
   const selected = WatchState.planRepos(repos, notifications, {
     lastRead, retry: Object.keys(retry), since, now, lowBudget: budgetLow(), readAll, config });
@@ -98,6 +101,7 @@ async function refresh(api, current, { now, includeOwn, readAll = false, config 
   for (const repo of selected) if (!failed.includes(repo)) nextRead[repo] = now;
   state.lastRead = nextRead;
   const newEvents = WatchState.apply(state, events, { now, includeOwn, config });
+  if (notifications) WatchState.rememberThreads(state, notifications);
 
   // push의 커밋 제목은 기록에 새로 들어온 push에만 한 번 읽어 API 호출을 줄인다.
   // 몇 개씩 동시에 읽고, 한도에 걸리면 남은 것은 다음 확인으로 미룬다(더 보내도 실패하고 2차 한도 위험만 커진다).

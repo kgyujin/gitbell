@@ -231,6 +231,9 @@ class AppModel {
       if (account !== this.accountGeneration) return;
       // 새로고침이 도는 동안 사용자가 바꾼 읽음 표시를 지킨다.
       this.state = WatchState.adoptingReadMarks(result.state, this.state);
+      // GitHub에서 읽은 PR·이슈의 활동은 GitBell에서도 읽음으로 바꾼다(알림 센터의 알림도 지운다).
+      const readOnGitHub = WatchState.applyGitHubReads(this.state);
+      if (readOnGitHub.length && this.deps.notifier.dismiss) this.deps.notifier.dismiss(readOnGitHub, false);
       this.saveState();
       // 기록이 넘쳐 목록에서 빠진 안 읽은 항목의 알림은 알림 센터에서도 지운다(누를 곳이 없는 알림이 남지 않게).
       const kept = new Set(this.state.history.map((e) => e.id));
@@ -238,7 +241,10 @@ class AppModel {
       if (dropped.length && this.deps.notifier.dismiss) this.deps.notifier.dismiss(dropped, false);
       if (result.failedRepos.length) this.problem = { type: 'partial', repos: result.failedRepos };
       else this.problem = result.notificationsUnavailable ? { type: 'limited' } : null;
-      const toNotify = Prefs.eventsToNotify(result.newEvents, this.settings.notificationPrefs, this.settings.display, this.state.me);
+      // 확인 사이에 GitHub에서 이미 읽은 새 활동은 알리지 않는다.
+      const stillUnread = this.unreadIds();
+      const toNotify = Prefs.eventsToNotify(result.newEvents.filter((event) => stillUnread.has(event.id)),
+        this.settings.notificationPrefs, this.settings.display, this.state.me);
       if (toNotify.length) this.deps.notifier.post(toNotify, this.settings.notificationPrefs.playsSound);
     } catch (error) {
       if (account !== this.accountGeneration) return;
@@ -366,6 +372,36 @@ class AppModel {
     const after = this.unreadIds();
     const ids = [...before].filter((id) => !after.has(id));
     if (ids.length && this.deps.notifier.dismiss) this.deps.notifier.dismiss(ids, this.unreadCount === 0);
+    if (ids.length) this.syncReadsToGitHub(ids);
+  }
+
+  /**
+   * GitBell에서 읽은 PR·이슈를 GitHub 알림에서도 읽음으로 바꾼다. 그 PR·이슈의 GitBell 활동을 모두 읽었을 때만 바꾼다
+   * (WatchState.threadsToMarkRead). 실패해도(권한 없는 토큰, 네트워크) GitBell의 읽음 표시는 그대로 둔다.
+   * @returns {Promise<void>} 테스트가 끝나기를 기다릴 수 있게 돌려준다.
+   */
+  syncReadsToGitHub(ids) {
+    if (this.demo) return Promise.resolve();
+    const keys = ids.map((id) => this.findEvent(id)).filter(Boolean).map(WatchState.threadKey).filter(Boolean);
+    const targets = WatchState.threadsToMarkRead(this.state, keys);
+    if (targets.length === 0) return Promise.resolve();
+    const account = this.accountGeneration;
+    this.pendingSync = (async () => {
+      const token = await this.currentToken().catch(() => null);
+      if (!token) return;
+      const api = this.deps.createAPI(token.value);
+      for (const { key, id } of targets) {
+        try {
+          await api.patch(`notifications/threads/${encodeURIComponent(id)}`);
+        } catch {
+          continue;
+        }
+        if (account !== this.accountGeneration) return;
+        WatchState.markThreadReadOnGitHub(this.state, key, this.deps.now());
+      }
+      this.saveState();
+    })();
+    return this.pendingSync;
   }
 
   /** id가 없으면 지금 화면에 보이는 항목을 모두 읽음으로 바꾼다(필터·숨긴 저장소 반영, 되돌릴 수 있다). */

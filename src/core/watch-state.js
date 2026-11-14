@@ -42,8 +42,12 @@ const DEFAULT_CONFIG = Object.freeze({
 /**
  * lastRead: 저장소마다 마지막으로 다 읽은 시각(ISO). 다음에 거기서부터 읽고, 바뀐 신호가 없으면 quietRecheck가 지날 때까지 읽지 않는다.
  */
+/**
+ * threads: 기록에 있는 PR·이슈의 GitHub 알림 스레드(읽음 동기화용). 키는 'owner/repo#번호'.
+ *   {id, unread, lastReadAt, updatedAt, appliedReadAt} — appliedReadAt: GitBell에 이미 반영한 lastReadAt.
+ */
 function createState() {
-  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {}, lastRead: {} };
+  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {}, lastRead: {}, threads: {} };
 }
 
 /** 형식이 다르거나 망가진 상태면 로그인 이름만 남기고 비운다. 시각이 망가진 값은 버린다(확인마다 오류로 멈추지 않게). */
@@ -55,6 +59,7 @@ function migrated(state) {
     merged.history = merged.history.filter((event) => event && valid(event.time));
     merged.retrySince = Object.fromEntries(Object.entries(merged.retrySince || {}).filter(([, value]) => valid(value)));
     merged.lastRead = Object.fromEntries(Object.entries(merged.lastRead || {}).filter(([, value]) => valid(value)));
+    merged.threads = merged.threads && typeof merged.threads === 'object' ? merged.threads : {};
     return merged;
   }
   const fresh = createState();
@@ -260,8 +265,101 @@ function planRepos(repos, notifications, { lastRead = {}, retry = [], since, now
   return [...selected].sort();
 }
 
+// MARK: GitHub 읽음 동기화
+
+/** GitHub 알림 스레드와 맞대는 키(저장소 + PR·이슈 번호). 번호가 없는 활동(push 등)은 스레드가 없다. */
+function threadKey(event) {
+  return event.number != null ? `${event.repo}#${event.number}` : null;
+}
+
+/** 알림 스레드의 키. PR·이슈만 다룬다(릴리스·Discussion·CI 알림은 GitBell 활동과 맞지 않는다). */
+function notificationKey(thread) {
+  const subject = thread && thread.subject;
+  if (!subject || !['PullRequest', 'Issue'].includes(subject.type) || typeof subject.url !== 'string') return null;
+  const number = subject.url.match(/\/(?:pulls|issues)\/(\d+)$/);
+  return number && thread.repository ? `${thread.repository.full_name}#${number[1]}` : null;
+}
+
+/**
+ * 알림함에서 읽은 스레드 중 기록에 있는 PR·이슈의 것을 기억한다. 기록에서 빠진 PR·이슈의 스레드는 잊는다.
+ * 이번에 받지 못한 스레드(오래돼 since 밖)는 기록에 남아 있는 동안 그대로 둔다.
+ */
+function rememberThreads(state, notifications) {
+  const keys = new Set(state.history.map(threadKey).filter(Boolean));
+  const threads = Object.fromEntries(Object.entries(state.threads || {}).filter(([key]) => keys.has(key)));
+  for (const thread of notifications || []) {
+    const key = notificationKey(thread);
+    if (!key || !keys.has(key)) continue;
+    const old = threads[key];
+    threads[key] = {
+      id: String(thread.id),
+      unread: thread.unread === true,
+      lastReadAt: thread.last_read_at || null,
+      updatedAt: thread.updated_at || null,
+      appliedReadAt: old && old.id === String(thread.id) ? old.appliedReadAt : null,
+    };
+  }
+  state.threads = threads;
+}
+
+/**
+ * GitHub에서 읽은 것을 GitBell에도 반영한다. 스레드의 lastReadAt이 지난번에 반영한 것보다 새로우면,
+ * 그 PR·이슈에서 그 시각까지 생긴 활동을 읽음으로 바꾼다. 같은 lastReadAt은 한 번만 반영해서,
+ * GitBell에서 다시 '안 읽음'으로 바꾼 항목을 덮어쓰지 않는다. 읽음으로 바뀐 항목 id를 돌려준다.
+ */
+function applyGitHubReads(state) {
+  const changed = [];
+  for (const [key, thread] of Object.entries(state.threads || {})) {
+    if (!thread.lastReadAt || (thread.appliedReadAt && time(thread.lastReadAt) <= time(thread.appliedReadAt))) continue;
+    for (const event of state.history) {
+      if (event.isUnread && threadKey(event) === key && time(event.time) <= time(thread.lastReadAt)) {
+        event.isUnread = false;
+        changed.push(event.id);
+      }
+    }
+    thread.appliedReadAt = thread.lastReadAt;
+  }
+  return changed;
+}
+
+/** GitHub 스레드에 GitBell 활동보다 새 소식이 있다고 보는 여유(시계·기록 시각 차이). */
+const THREAD_SLACK = 2 * 60 * 1000;
+
+/**
+ * GitBell에서 읽은 뒤 GitHub에서도 읽음으로 바꿀 스레드. 이 PR·이슈의 GitBell 활동을 모두 읽었고,
+ * GitHub에서는 아직 안 읽음이며, GitHub 쪽에 GitBell이 보이지 않은 더 새 소식이 없을 때만 고른다.
+ */
+function threadsToMarkRead(state, keys) {
+  const result = [];
+  for (const key of new Set(keys)) {
+    const thread = state.threads && state.threads[key];
+    if (!thread || !thread.unread) continue;
+    const events = state.history.filter((event) => threadKey(event) === key);
+    if (events.length === 0 || events.some((event) => event.isUnread)) continue;
+    const newest = Math.max(...events.map((event) => time(event.time)));
+    if (thread.updatedAt && time(thread.updatedAt) > newest + THREAD_SLACK) continue;
+    result.push({ key, id: thread.id });
+  }
+  return result;
+}
+
+/** GitHub에서 읽음으로 바꾼 뒤. 그 시각을 반영한 것으로 두어 다음 확인에서 다시 반영하지 않는다. */
+function markThreadReadOnGitHub(state, key, now) {
+  const thread = state.threads && state.threads[key];
+  if (!thread) return;
+  thread.unread = false;
+  thread.lastReadAt = now;
+  thread.appliedReadAt = now;
+}
+
 module.exports = {
   CURRENT_VERSION,
+  threadKey,
+  notificationKey,
+  rememberThreads,
+  applyGitHubReads,
+  threadsToMarkRead,
+  markThreadReadOnGitHub,
   planRepos,
   DEFAULT_CONFIG,
   createState,
