@@ -1,8 +1,6 @@
-.build/
-.swiftpm/
 dist/
-*.app
 node_modules/
+test-results/
 .DS_Store
 .env
 .env.*
