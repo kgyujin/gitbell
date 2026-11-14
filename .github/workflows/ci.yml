@@ -68,7 +68,8 @@ jobs:
         if: runner.os != 'Linux'
         run: npx -y gitbell@0.5.3
       - name: Install the released app with the installer
-        run: node -e "require('./bin/gitbell.js').install({ version: '0.6.0' })"
+        run: |
+          node -e "require('./bin/gitbell.js').install({ version: '0.6.0' })"
       - name: Check (macOS)
         if: runner.os == 'macOS'
         run: |

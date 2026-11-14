@@ -204,9 +204,10 @@ function removeLegacyWindows(paths) {
 
 function installWindows(version) {
   const paths = windowsPaths();
-  removeLegacyWindows(paths);
   withTempDir((dir) => {
+    // 받기에 성공한 뒤에만 예전 설치본을 정리한다(받지 못하면 쓰던 앱이 그대로 남는다).
     const installer = download(version, dir);
+    removeLegacyWindows(paths);
     step(t('Installing', '설치하는 중'));
     // /S: 창 없이 설치, --force-run: 설치한 뒤 실행. 실행 중인 GitBell은 설치 파일이 끝내고 바꾼다.
     const result = run(installer, ['/S', '--force-run'], { timeout: 5 * 60 * 1000 });
