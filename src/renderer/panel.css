@@ -27,6 +27,8 @@
   --chart-pullRequests: #2a78d6;
   --chart-reviews: #eb6834;
   --chart-commits: #1baf7a;
+  /* 활동 잔디에서 활동이 없는 날의 칸. 활동이 있는 날은 종류 색(--chart-*)을 비율대로 섞는다. */
+  --heat-0: #ebedf0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -51,6 +53,7 @@
     --chart-pullRequests: #3987e5;
     --chart-reviews: #d95926;
     --chart-commits: #199e70;
+    --heat-0: #33393f;
   }
 }
 
@@ -547,6 +550,8 @@ code {
   .unread-dot { forced-color-adjust: none; background: Highlight; }
   .chip.selected, .segment.selected, .menu-chip.active { outline: 2px solid Highlight; }
   .kind-badge { border: 1px solid CanvasText; }
+  /* 잔디는 색의 진하기로 수를 보이므로 시스템 색으로 바꾸지 않는다. */
+  .heat-svg, .heat-swatch { forced-color-adjust: none; }
 }
 
 /* 활동 차트 */
@@ -573,3 +578,52 @@ code {
 .chart-track { height: 8px; border-radius: 0 4px 4px 0; background: var(--card); overflow: hidden; }
 .chart-fill { display: block; height: 100%; min-width: 2px; border-radius: 0 4px 4px 0; background: var(--chart-pullRequests); }
 .chart-count { text-align: right; font-variant-numeric: tabular-nums; }
+.chart-col { outline: none; }
+.chart-col:focus-visible .chart-hit, .chart-col.tip-active .chart-hit { fill: var(--hover); stroke: var(--accent-text); stroke-width: 1; }
+
+/* 활동 잔디 */
+.heat-svg { width: 100%; height: auto; display: block; overflow: visible; }
+.heat-stat { color: var(--secondary); }
+/* 칸은 그날 가장 많은 종류의 색. 활동이 많을수록 진하다(색은 그대로, 투명도만 바꾼다). */
+.heat-cell { stroke: none; }
+.heat-cell.level-0, .heat-swatch.level-0 { fill: var(--heat-0); background: var(--heat-0); }
+.heat-cell.kind-pullRequests { fill: var(--chart-pullRequests); }
+.heat-cell.kind-reviews { fill: var(--chart-reviews); }
+.heat-cell.kind-commits { fill: var(--chart-commits); }
+.heat-cell.level-1 { fill-opacity: 0.4; }
+.heat-cell.level-2 { fill-opacity: 0.6; }
+.heat-cell.level-3 { fill-opacity: 0.8; }
+.heat-cell.level-4 { fill-opacity: 1; }
+/* 진하기 범례는 종류 색과 헷갈리지 않게 글자색의 진하기로 보인다. */
+.heat-swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--text); }
+.heat-swatch.level-1 { opacity: 0.25; }
+.heat-swatch.level-2 { opacity: 0.45; }
+.heat-swatch.level-3 { opacity: 0.68; }
+.heat-swatch.level-4 { opacity: 0.9; }
+.heat-cell.today { stroke: var(--text); stroke-width: 1.2; }
+.heat-cell:hover, .heat-cell.tip-active { stroke: var(--accent-text); stroke-width: 2; }
+.heat-scale { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; font-size: 10px; }
+.heat-legend { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; color: var(--secondary); }
+.heat-scale .spacer { min-width: 6px; }
+
+
+/* 차트 말풍선: 막대·잔디 칸에 마우스를 올리면 그날의 수를 보인다. */
+.chart-tip {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  gap: 3px;
+  min-width: 140px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--layer);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px var(--shadow);
+  font-size: 11px;
+  pointer-events: none;
+}
+.tip-date { font-size: 12px; }
+.tip-total { color: var(--secondary); margin-bottom: 2px; }
+.tip-row { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: 6px; }
+.tip-row strong { font-variant-numeric: tabular-nums; }
+

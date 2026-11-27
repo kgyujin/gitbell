@@ -163,7 +163,7 @@ test('AppModel: 데모 상태로 목록·필터·읽음 표시', () => {
   model.setQuery({ category: 'commits' });
   assert.deepEqual(model.viewModel().sections.flatMap((s) => s.events.map((e) => e.id)), ['3', '7']);
   model.markRead();
-  assert.equal(model.unreadCount, 2, "'모두 읽음'은 보이는 항목에만");
+  assert.equal(model.unreadCount, 0, "'모두 읽음'은 필터·검색과 상관없이 모두 읽음으로 바꾼다");
   model.resetFilters();
   assert.equal(model.viewModel().isFiltering, false);
 

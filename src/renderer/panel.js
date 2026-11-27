@@ -95,7 +95,7 @@ function renderHeader() {
     <span class="brand">${icon('bell', 'brand-icon')}<strong>GitBell</strong>${unread}</span>
     <span class="spacer"></span>
     ${view.showsOnboarding ? '' : iconButton('search', keys(t('Search (Ctrl+F)')), 'data-ui="toggleSearch"', { active: view.showingSearch })}
-    ${view.visibleUnreadCount > 0 ? iconButton('checkCircle', t('Mark everything shown as read'), actionAttrs('markRead')) : ''}
+    ${view.unreadCount > 0 ? iconButton('checkCircle', t('Mark all as read'), actionAttrs('markRead')) : ''}
     ${iconButton('refresh', keys(t('Refresh (Ctrl+R)')), actionAttrs('refresh'), { spinning: view.isRefreshing })}
     ${view.showsOnboarding ? '' : iconButton('chart', t('Activity chart'), actionAttrs('setShowingChart', true))}
     ${iconButton('settings', keys(t('Settings (Ctrl+,)')), actionAttrs('setShowingSettings', true))}`;
@@ -399,20 +399,37 @@ function roundedTop(x, y, width, height, radius) {
   return `M${x},${y + height}V${y + r}Q${x},${y} ${x + r},${y}H${x + width - r}Q${x + width},${y} ${x + width},${y + r}V${y + height}Z`;
 }
 
+function localDay(date) {
+  const [year, month, day] = date.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 function dayLabel(date, isToday) {
   if (isToday) return t('Today');
-  const [year, month, day] = date.split('-').map(Number);
-  return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(new Date(year, month - 1, day));
+  return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(localDay(date));
 }
 
+/** '11월 20일 (목)'. 올해가 아니면 연도도 붙인다. */
+function longDate(date) {
+  const day = localDay(date);
+  const options = { month: 'long', day: 'numeric', weekday: 'short' };
+  if (day.getFullYear() !== new Date().getFullYear()) options.year = 'numeric';
+  return new Intl.DateTimeFormat(locale, options).format(day);
+}
+
+/** 화면 읽기와 칸의 이름표: '11월 20일 (목), 활동 3개: PR 1, 리뷰 2, 커밋 0'. */
 function dayDetail(day) {
-  const [year, month, date] = day.date.split('-').map(Number);
-  const when = new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', weekday: 'short' }).format(new Date(year, month - 1, date));
   const parts = CHART_SERIES.map(([key, label]) => `${t(label)} ${day.counts[key]}`).join(', ');
-  return `${when} · ${format('%lld items', day.total)} (${parts})`;
+  return `${longDate(day.date)}, ${format('%lld activities', day.total)}: ${parts}`;
 }
 
-/** 날짜별 쌓은 막대. 칸마다 <title>로 그날의 수를 보인다(마우스를 올리면 뜬다). */
+/** 마우스를 올리거나 초점을 둔 칸이 보여 줄 값(data-tip-*). 말풍선(showChartTip)이 읽는다. */
+function tipAttrs(day) {
+  // 속성 이름은 HTML이 소문자로 바꾸므로 종류별 수는 한 속성에 순서대로('PR,리뷰,커밋') 둔다.
+  return `data-tip-date="${esc(day.date)}" data-tip-total="${day.total}" data-tip-counts="${CHART_SERIES.map(([key]) => day.counts[key]).join(',')}"`;
+}
+
+/** 날짜별 쌓은 막대. 칸에 마우스를 올리거나 Tab으로 가면 그날의 수가 말풍선으로 뜬다. */
 function renderDailyBars(chart) {
   const width = 368;
   const top = 14;
@@ -434,16 +451,79 @@ function renderDailyBars(chart) {
       return `<path class="chart-seg chart-${key}" d="${shown}"/>`;
     }).join('');
     const isToday = index === chart.days.length - 1;
-    return `<g class="chart-col"><title>${esc(dayDetail(day))}</title>
+    return `<g class="chart-col" tabindex="0" role="img" aria-label="${esc(dayDetail(day))}" ${tipAttrs(day)}>
       <rect class="chart-hit" x="${x - gap / 2}" y="0" width="${barWidth + gap}" height="${baseline + 22}"/>
       ${segments}
       <text class="chart-axis${isToday ? ' today' : ''}" x="${x + barWidth / 2}" y="${baseline + 16}" text-anchor="middle">${esc(dayLabel(day.date, isToday))}</text></g>`;
   }).join('');
-  return `<svg class="chart-svg" viewBox="0 0 ${width} ${baseline + 22}" role="img" aria-label="${esc(format('Last %lld days', chart.dayCount))}">
+  return `<svg class="chart-svg" viewBox="0 0 ${width} ${baseline + 22}" aria-label="${esc(format('Last %lld days', chart.dayCount))}">
     <line class="chart-grid" x1="0" x2="${width}" y1="${top}" y2="${top}"/>
     <text class="chart-axis" x="0" y="${top - 4}">${chart.max}</text>
     ${columns}
     <line class="chart-baseline" x1="0" x2="${width}" y1="${baseline}" y2="${baseline}"/></svg>`;
+}
+
+/** 그날 가장 많은 종류(같으면 PR → 리뷰 → 커밋 순). 칸을 이 종류의 색으로 칠한다. */
+function dominantKind(counts) {
+  return CHART_SERIES.reduce((best, [key]) => (counts[key] > counts[best] ? key : best), CHART_SERIES[0][0]);
+}
+
+/**
+ * GitHub 잔디처럼 주(열) × 요일(행) 칸. 칸은 그날 가장 많은 종류의 색(PR 파랑 · 리뷰 주황 · 커밋 초록)으로
+ * 칠하고, 활동이 많은 날일수록 진하다(0~4단계, panel.css의 .heat-cell.level-*). 종류별 수는 말풍선에 보인다.
+ */
+function renderHeatmap(heat) {
+  const cell = 11;
+  const step = 13;
+  const left = 24;
+  const top = 16;
+  const width = left + heat.weeks.length * step;
+  const height = top + 7 * step;
+  const monthFormat = new Intl.DateTimeFormat(locale, { month: 'short' });
+  const weekdayFormat = new Intl.DateTimeFormat(locale, { weekday: 'short' });
+  const todayDate = heat.weeks.flat().filter((day) => !day.future).at(-1)?.date;
+  // 달 이름: 그 달 1일이 들어 있는 주에 붙인다. 바로 앞 이름과 3주 안으로 붙으면 겹쳐 보여 뺀다.
+  const months = [];
+  heat.weeks.forEach((week, index) => {
+    const first = week.find((day) => day.date.endsWith('-01'));
+    const label = first ? first : index === 0 ? week[0] : null;
+    if (!label) return;
+    const previous = months.at(-1);
+    if (previous && index - previous.index < 3) {
+      if (previous.index === 0) months.pop();
+      else return;
+    }
+    months.push({ index, text: monthFormat.format(localDay(label.date)) });
+  });
+  const monthLabels = months.map(({ index, text }) => `<text class="chart-axis" x="${left + index * step}" y="${top - 5}">${esc(text)}</text>`).join('');
+  // 요일 이름은 월·수·금만(GitHub처럼). 2024-01-01은 월요일이다.
+  const weekdayLabels = [1, 3, 5].map((weekday) => {
+    const text = weekdayFormat.format(new Date(2024, 0, weekday));
+    return `<text class="chart-axis" x="0" y="${top + weekday * step + cell - 2}">${esc(text)}</text>`;
+  }).join('');
+  const cells = heat.weeks.map((week, column) => week.map((day, row) => {
+    if (day.future) return '';
+    const today = day.date === todayDate ? ' today' : '';
+    const kind = day.total > 0 ? ` kind-${dominantKind(day.counts)}` : '';
+    return `<rect class="heat-cell level-${day.level}${kind}${today}" x="${left + column * step}" y="${top + row * step}" width="${cell}" height="${cell}" rx="3" ${tipAttrs(day)}/>`;
+  }).join('')).join('');
+  const summary = `${t('Last 6 months')}: ${format('%lld activities', heat.total)}, ${format('%lld active days', heat.activeDays)}`;
+  return `<svg class="heat-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(summary)}">
+    ${monthLabels}${weekdayLabels}${cells}</svg>`;
+}
+
+function renderHeatmapCard(heat) {
+  const stats = `<div class="chart-legend">
+    <span class="chart-total"><strong>${heat.total}</strong> <span class="secondary">${esc(t('All'))}</span></span>
+    <span class="heat-stat">${esc(format('%lld active days', heat.activeDays))}</span>
+    ${heat.busiest ? `<span class="heat-stat">${esc(format('Busiest day: %@', `${longDate(heat.busiest.date)} · ${format('%lld activities', heat.busiest.total)}`))}</span>` : ''}</div>`;
+  // 아래: 왼쪽은 색의 뜻(PR · 리뷰 · 커밋), 오른쪽은 진하기(적음 → 많음).
+  const scale = `<div class="heat-scale" aria-hidden="true">
+    ${CHART_SERIES.map(([key, label]) => `<span class="heat-legend"><span class="chart-swatch chart-${key}"></span>${esc(t(label))}</span>`).join('')}
+    <span class="spacer"></span><span class="secondary">${esc(t('Less'))}</span>
+    ${[0, 1, 2, 3, 4].map((level) => `<span class="heat-swatch level-${level}"></span>`).join('')}
+    <span class="secondary">${esc(t('More'))}</span></div>`;
+  return `<div class="chart-card">${stats}${renderHeatmap(heat)}${scale}</div>`;
 }
 
 function renderChart() {
@@ -459,19 +539,63 @@ function renderChart() {
     <tr><th>${esc(t('Date'))}</th>${CHART_SERIES.map(([, label]) => `<th>${esc(t(label))}</th>`).join('')}</tr>
     ${chart.days.map((day, index) => `<tr><th>${esc(dayLabel(day.date, index === chart.days.length - 1))}</th>${CHART_SERIES.map(([key]) => `<td>${day.counts[key]}</td>`).join('')}</tr>`).join('')}</table>`;
   const most = Math.max(1, ...chart.repos.map((item) => item.count));
+  // 막대 길이는 data-fill로 두고 그린 뒤에 정한다(style 속성은 보안 정책(CSP)이 막아 모든 막대가 끝까지 찼다).
   const repos = chart.repos.length === 0 ? '' : settingsSection(t('Most active repositories'), `<div class="chart-repos">
     ${chart.repos.map((item) => `<div class="chart-repo" title="${esc(item.repo)}"><span class="chart-repo-name">${esc(shortened(item.repo, 30))}</span>
-      <span class="chart-track"><span class="chart-fill" style="width:${Math.round((item.count / most) * 100)}%"></span></span>
+      <span class="chart-track"><span class="chart-fill" data-fill="${Math.round((item.count / most) * 100)}"></span></span>
       <strong class="chart-count">${item.count}</strong></div>`).join('')}</div>`);
 
+  hideChartTip();
   $('#chart').innerHTML = `
     <div class="settings-header">${iconButton('chevronLeft', t('Back'), actionAttrs('setShowingChart', false))}<strong>${esc(t('Activity chart'))}</strong></div>
     <div class="settings-scroll" id="chartScroll">
       ${settingsSection(format('Last %lld days', chart.dayCount), `<div class="chart-card">${legend}${daily}${table}</div>`)}
+      ${settingsSection(t('Last 6 months'), renderHeatmapCard(chart.heatmap))}
       ${repos}
-      <p class="secondary small">${esc(format('Based on %lld recent activities GitBell keeps', chart.historyCount))}</p>
+      <p class="secondary small">${esc(t('GitBell counts the activity it has checked, by day. Days when GitBell was off may look empty.'))}</p>
     </div>`;
+  for (const fill of document.querySelectorAll('#chart .chart-fill[data-fill]')) fill.style.width = `${fill.dataset.fill}%`;
 }
+
+// MARK: - 차트 말풍선
+
+/** 막대·잔디 칸에 마우스를 올리거나 초점을 두면 그날의 종류별 수를 보인다. */
+function showChartTip(target) {
+  const tip = $('#chartTip');
+  const data = target.dataset;
+  const total = Number(data.tipTotal);
+  const rows = total === 0 ? `<span class="secondary">${esc(t('No activity on this day'))}</span>`
+    : CHART_SERIES.map(([key, label], index) => `<span class="tip-row"><span class="chart-swatch chart-${key}"></span>${esc(t(label))}<strong>${esc(data.tipCounts.split(',')[index])}</strong></span>`).join('');
+  tip.innerHTML = `<strong class="tip-date">${esc(longDate(data.tipDate))}</strong>
+    ${total > 0 ? `<span class="tip-total">${esc(format('%lld activities', total))}</span>` : ''}${rows}`;
+  tip.hidden = false;
+  const box = target.getBoundingClientRect();
+  const width = tip.offsetWidth;
+  const height = tip.offsetHeight;
+  const viewport = document.documentElement.clientWidth;
+  const left = Math.max(6, Math.min(box.left + box.width / 2 - width / 2, viewport - width - 6));
+  const above = box.top - height - 6;
+  tip.style.left = `${left}px`;
+  tip.style.top = `${above >= 6 ? above : box.bottom + 6}px`;
+  for (const old of document.querySelectorAll('#chart .tip-active')) old.classList.remove('tip-active');
+  target.classList.add('tip-active');
+}
+
+function hideChartTip() {
+  const tip = $('#chartTip');
+  if (tip) tip.hidden = true;
+  for (const old of document.querySelectorAll('#chart .tip-active')) old.classList.remove('tip-active');
+}
+
+const tipTarget = (event) => event.target.closest && event.target.closest('[data-tip-date]');
+$('#chart').addEventListener('pointerover', (event) => { const target = tipTarget(event); if (target) showChartTip(target); });
+$('#chart').addEventListener('pointerout', (event) => {
+  const target = tipTarget(event);
+  if (target && !target.contains(event.relatedTarget)) hideChartTip();
+});
+$('#chart').addEventListener('focusin', (event) => { const target = tipTarget(event); if (target) showChartTip(target); });
+$('#chart').addEventListener('focusout', hideChartTip);
+$('#chart').addEventListener('scroll', hideChartTip, true);
 
 // MARK: - 고르기 메뉴(저장소·정렬·우클릭)
 

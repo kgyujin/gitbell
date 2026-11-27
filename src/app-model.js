@@ -6,7 +6,7 @@ const WatchState = require('./core/watch-state');
 const Query = require('./core/activity-query');
 const Prefs = require('./core/preferences');
 const Poller = require('./core/poller');
-const { activityStats } = require('./core/activity-stats');
+const { activityStats, heatmap } = require('./core/activity-stats');
 const { categoryOf, repoName, EventKind } = require('./core/models');
 
 /** 활동 종류 전체(검색용 화면 이름을 만들 때 쓴다). */
@@ -14,8 +14,10 @@ const KINDS = Object.values(EventKind);
 const { isBot } = require('./core/event-builder');
 
 const REFRESH_CHOICES = [1, 2, 5, 10, 15];
-/** 활동 차트가 보이는 기간(일). */
+/** 활동 차트 막대가 보이는 기간(일). */
 const CHART_DAYS = 7;
+/** 활동 잔디가 보이는 기간(주). 패널 폭(420px)에서 칸이 잘 보이는 6개월. */
+const HEATMAP_WEEKS = 26;
 /** 여러 항목을 읽음으로 바꾼 뒤 '되돌리기'를 보이는 시간. */
 const UNDO_MS = 8000;
 /** 새 버전 확인 간격(분). 확인 주기(1·2·5·10·15분)로 나누어떨어져야 정확히 1시간마다 확인한다. */
@@ -392,30 +394,39 @@ class AppModel {
   syncReadsToGitHub(ids) {
     if (this.demo) return Promise.resolve();
     const keys = ids.map((id) => this.findEvent(id)).filter(Boolean).map(WatchState.threadKey).filter(Boolean);
-    const targets = WatchState.threadsToMarkRead(this.state, keys);
+    const isShown = (event) => Prefs.shows(this.settings.display, event);
+    const targets = WatchState.threadsToMarkRead(this.state, keys, isShown);
     if (targets.length === 0) return Promise.resolve();
     const account = this.accountGeneration;
     this.pendingSync = (async () => {
       const token = await this.currentToken().catch(() => null);
       if (!token) return;
       const api = this.deps.createAPI(token.value);
-      for (const { key, id } of targets) {
+      for (const { key } of targets) {
+        // 요청 사이에 '되돌리기'로 다시 안 읽음이 됐으면 그 스레드는 GitHub에서 읽음으로 바꾸지 않는다.
+        const [target] = WatchState.threadsToMarkRead(this.state, [key], isShown);
+        if (!target) continue;
         try {
-          await api.patch(`notifications/threads/${encodeURIComponent(id)}`);
+          await api.patch(`notifications/threads/${encodeURIComponent(target.id)}`);
         } catch {
           continue;
         }
         if (account !== this.accountGeneration) return;
-        WatchState.markThreadReadOnGitHub(this.state, key, this.deps.now());
+        WatchState.markThreadReadOnGitHub(this.state, key, this.deps.now(), isShown);
       }
       this.saveState();
+      this.emit();
     })();
     return this.pendingSync;
   }
 
-  /** id가 없으면 지금 화면에 보이는 항목을 모두 읽음으로 바꾼다(필터·숨긴 저장소 반영, 되돌릴 수 있다). */
+  /**
+   * id가 없으면 모든 항목을 읽음으로 바꾼다(되돌릴 수 있다). 필터·검색과 상관없이, 숨긴 저장소·봇 활동까지 모두다.
+   * 보이는 것만 바꾸면 필터를 켜 둔 채 누를 때 나머지가 안 읽음으로 남아 트레이 숫자가 줄지 않고,
+   * 숨긴 봇 댓글이 남은 PR은 GitHub 알림도 읽음으로 바뀌지 않았다. 일부만 읽으려면 묶음의 '읽음 표시'를 쓴다.
+   */
   markRead(id) {
-    if (id == null) return this.markEventsRead(this.visibleFiltered());
+    if (id == null) return this.markEventsRead(this.state.history);
     const before = this.unreadIds();
     WatchState.markRead(this.state, id);
     this.saveState();
@@ -692,11 +703,12 @@ class AppModel {
         || (this.problem && this.problem.type === 'unauthorized' && this.state.history.length === 0) || false,
       showingSettings: this.showingSettings,
       showingChart: this.showingChart,
-      /** 활동 차트 자료. 차트를 볼 때만 만든다(숨긴 저장소·봇 설정을 따른다). */
+      /** 활동 차트 자료. 차트를 볼 때만 만든다(날짜별 합계로 그리고, 숨긴 저장소·봇 설정을 따른다). */
       chart: this.showingChart ? {
-        ...activityStats(visible, { now: this.deps.now(), days: CHART_DAYS }),
+        ...activityStats(this.state.daily || {}, { now: this.deps.now(), days: CHART_DAYS, display: this.settings.display }),
         dayCount: CHART_DAYS,
-        historyCount: visible.length,
+        heatmap: heatmap(this.state.daily || {}, { now: this.deps.now(), weeks: HEATMAP_WEEKS, display: this.settings.display }),
+        weekCount: HEATMAP_WEEKS,
       } : null,
       showingSearch: this.showingSearch,
       query: { ...this.settings.query, search: this.search },

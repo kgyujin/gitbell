@@ -144,7 +144,7 @@ Otherwise, paste a [personal access token](https://github.com/settings/tokens/ne
 
 **Read state in sync with GitHub.** PRs and issues you read on GitHub turn read in GitBell, and once you've read all of a PR's or issue's activity in GitBell, its GitHub notification is marked read too. Activity with no GitHub notification, like pushes, is tracked on this computer only.
 
-**Activity chart.** The chart button in the header shows the last 7 days of activity by day (PRs, reviews, commits) and your most active repositories.
+**Activity chart.** The chart button in the header shows the last 7 days of activity by day (PRs, reviews, commits), a GitHub-style grid of the last 6 months colored by each day's most common kind, and your most active repositories. Hover a day to see its counts. GitBell keeps daily totals as it checks, so days when it wasn't running may look empty.
 
 GitBell follows your system's light or dark appearance and language (English or Korean), and works with the keyboard and screen readers (VoiceOver, Narrator).
 

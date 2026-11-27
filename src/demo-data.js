@@ -3,6 +3,36 @@
 
 const { makeEvent } = require('./core/models');
 const { createState } = require('./core/watch-state');
+const { dailyFromHistory, localDate } = require('./core/activity-stats');
+
+const DEMO_REPOS = ['acme/web', 'acme/api', 'acme/design-system'];
+
+/**
+ * 활동 잔디·막대가 비어 보이지 않게 지난 6개월의 날짜별 합계를 채운다. 매번 같은 그림이 나오게 난수 대신
+ * 정해진 수열을 쓴다(스크린숏·테스트가 흔들리지 않게). 평일은 많고 주말은 적다. 오늘·어제는 기록(history)으로 센다.
+ */
+function demoDaily(now, history) {
+  const daily = dailyFromHistory(history);
+  let seed = 7;
+  const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  for (let offset = 2; offset < 27 * 7; offset += 1) {
+    const day = new Date(today);
+    day.setDate(today.getDate() - offset);
+    const weekend = day.getDay() === 0 || day.getDay() === 6;
+    const busy = next();
+    if (busy < (weekend ? 0.7 : 0.15)) continue;
+    const repos = {};
+    for (const repo of DEMO_REPOS) {
+      const scale = weekend ? 1 : 3;
+      const counts = [Math.floor(next() * scale), Math.floor(next() * scale * 1.5), Math.floor(next() * scale * 2), 0, Math.floor(next() * 1.2), 0];
+      if (counts.some(Boolean)) repos[repo] = counts;
+    }
+    daily[localDate(day.getTime())] = repos;
+  }
+  return daily;
+}
 
 function demoState(now = Date.now()) {
   const ago = (minutes) => new Date(now - minutes * 60 * 1000).toISOString();
@@ -31,6 +61,7 @@ function demoState(now = Date.now()) {
     makeEvent({ id: '8', repo: 'acme/design-system', kind: 'prOpened', time: ago(60 * 22), actor: 'lee', number: 56,
       title: 'New color tokens for charts', url: url('acme/design-system/pull/56') }),
   ];
+  state.daily = demoDaily(now, state.history);
   return state;
 }
 
