@@ -215,4 +215,5 @@
 "Less" = "적음";
 "More" = "많음";
 "No activity on this day" = "이날은 활동이 없습니다";
-"GitBell counts the activity it has checked, by day. Days when GitBell was off may look empty." = "GitBell이 확인한 활동을 날짜별로 셉니다. GitBell이 꺼져 있던 날은 비어 보일 수 있습니다.";
+"GitBell counts the activity it checks, by day. Days before that were loaded once from GitHub (past commits count default-branch commits)." = "GitBell이 확인한 활동을 날짜별로 셉니다. 그 전 날짜는 GitHub에서 한 번 불러왔습니다(지난 커밋은 기본 브랜치 커밋 수로 셉니다).";
+"Loading past activity from GitHub…" = "GitHub에서 지난 활동을 불러오는 중…";

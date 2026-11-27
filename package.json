@@ -1,7 +1,7 @@
 {
   "name": "gitbell",
   "productName": "GitBell",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "description": "GitHub activity in your menu bar or system tray: pull requests, reviews, merges and commits across all your repositories.",
   "homepage": "https://github.com/kgyujin/gitbell#readme",
   "repository": {

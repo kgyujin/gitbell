@@ -21,7 +21,7 @@ test('활동 차트: 날짜별 막대·잔디·말풍선·저장소 순위를 �
   assert.ok(await window.locator('.chart-seg').count() > 0, '막대가 그려진다');
   assert.equal(await window.locator('.chart-key').count(), 3, '범례: PR · 리뷰 · 커밋');
   assert.ok(await window.locator('.chart-repo').count() > 0);
-  assert.match(await window.locator('#chart').textContent(), /GitBell counts the activity it has checked, by day/);
+  assert.match(await window.locator('#chart').textContent(), /GitBell counts the activity it checks, by day/);
 
   // 저장소 막대는 수에 비례한다(예전에는 보안 정책이 길이 지정을 막아 모두 끝까지 찼다).
   const counts = (await window.locator('.chart-count').allTextContents()).map(Number);

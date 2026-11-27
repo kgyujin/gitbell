@@ -136,10 +136,16 @@ function activityStats(daily, { now, days = 7, topRepos = 5, display = {} }) {
  * @returns {{weeks: {date: string, counts: object, total: number, level: number, future: boolean}[][],
  *   total: number, max: number, activeDays: number, busiest: {date: string, total: number}|null}}
  */
+/** 잔디의 첫 칸(weeks주 전 일요일 자정, 이 컴퓨터 시간대). */
+function heatmapStart(now, weeks = 26) {
+  const first = todayStart(now);
+  first.setDate(first.getDate() - first.getDay() - (weeks - 1) * 7);
+  return first;
+}
+
 function heatmap(daily, { now, weeks = 26, display = {} }) {
   const today = todayStart(now);
-  const first = new Date(today);
-  first.setDate(today.getDate() - today.getDay() - (weeks - 1) * 7);
+  const first = heatmapStart(now, weeks);
   const columns = [];
   let max = 0;
   let total = 0;
@@ -168,6 +174,6 @@ function heatmap(daily, { now, weeks = 26, display = {} }) {
 }
 
 module.exports = {
-  activityStats, heatmap, addToDaily, pruneDaily, dailyFromHistory, sanitizeDaily, countDay,
+  activityStats, heatmap, heatmapStart, addToDaily, pruneDaily, dailyFromHistory, sanitizeDaily, countDay,
   localDate, dayStart, CATEGORIES, DAILY_KEEP_DAYS,
 };

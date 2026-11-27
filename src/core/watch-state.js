@@ -50,9 +50,12 @@ const DEFAULT_CONFIG = Object.freeze({
  */
 /**
  * daily: 날짜별 활동 합계(활동 통계용, activity-stats.js). 목록 기록과 달리 150개로 줄지 않고 6개월치를 남긴다.
+ * dailyStartedAt: GitBell이 날짜별 합계를 직접 세기 시작한 때. 그 전 날짜는 GitHub에서 불러와 채운다(backfill.js).
+ * backfill: 지난 날짜를 불러온 기록 {doneAt}. 없으면 아직 불러오지 않았다.
  */
 function createState() {
-  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {}, lastRead: {}, threads: {}, daily: {} };
+  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {}, lastRead: {}, threads: {}, daily: {},
+    dailyStartedAt: null, backfill: null };
 }
 
 /** 형식이 다르거나 망가진 상태면 로그인 이름만 남기고 비운다. 시각이 망가진 값은 버린다(확인마다 오류로 멈추지 않게). */
@@ -67,6 +70,9 @@ function migrated(state) {
     merged.threads = merged.threads && typeof merged.threads === 'object' ? merged.threads : {};
     // 날짜별 합계가 없던 예전 상태는 남아 있는 기록으로 채운다.
     merged.daily = Stats.sanitizeDaily(state.daily) || Stats.dailyFromHistory(merged.history);
+    // 이미 쓰던 상태인데 언제부터 셌는지 모르면 지금부터 센 것으로 본다(그 전 날짜는 GitHub에서 불러온다).
+    if (!valid(merged.dailyStartedAt)) merged.dailyStartedAt = merged.lastChecked ? new Date().toISOString() : null;
+    if (!merged.backfill || !valid(merged.backfill.doneAt)) merged.backfill = null;
     return merged;
   }
   const fresh = createState();
@@ -114,6 +120,7 @@ function apply(state, events, { now, includeOwn, config = DEFAULT_CONFIG }) {
     if (event.isUnread) toNotify.push(event);
   }
   Stats.pruneDaily(state.daily || (state.daily = {}), now);
+  if (!state.dailyStartedAt) state.dailyStartedAt = now;
   // 시계가 잠깐 앞으로 뛰어도(며칠 뒤) 본 항목을 지우지 않게, 지난 확인 시각과 지금 중 이른 쪽을 기준으로 지운다.
   const reference = state.lastChecked ? Math.min(time(state.lastChecked), time(now)) : time(now);
   const cutoff = reference - config.seenRetention;

@@ -584,6 +584,8 @@ code {
 /* 활동 잔디 */
 .heat-svg { width: 100%; height: auto; display: block; overflow: visible; }
 .heat-stat { color: var(--secondary); }
+.chart-loading { display: flex; align-items: center; gap: 6px; margin: 0 0 6px 4px; }
+.chart-loading .icon { width: 12px; height: 12px; animation: spin 1s linear infinite; }
 /* 칸은 그날 가장 많은 종류의 색. 활동이 많을수록 진하다(색은 그대로, 투명도만 바꾼다). */
 .heat-cell { stroke: none; }
 .heat-cell.level-0, .heat-swatch.level-0 { fill: var(--heat-0); background: var(--heat-0); }
