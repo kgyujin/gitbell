@@ -6,7 +6,8 @@ const WatchState = require('./core/watch-state');
 const Query = require('./core/activity-query');
 const Prefs = require('./core/preferences');
 const Poller = require('./core/poller');
-const { activityStats, heatmap } = require('./core/activity-stats');
+const { activityStats, heatmap, heatmapStart } = require('./core/activity-stats');
+const { backfillDaily, mergeBackfill } = require('./core/backfill');
 const { categoryOf, repoName, EventKind } = require('./core/models');
 
 /** 활동 종류 전체(검색용 화면 이름을 만들 때 쓴다). */
@@ -18,6 +19,8 @@ const REFRESH_CHOICES = [1, 2, 5, 10, 15];
 const CHART_DAYS = 7;
 /** 활동 잔디가 보이는 기간(주). 패널 폭(420px)에서 칸이 잘 보이는 6개월. */
 const HEATMAP_WEEKS = 26;
+/** 지난 활동 불러오기가 실패하면 다시 해 보기까지 기다리는 시간. */
+const BACKFILL_RETRY_MS = 30 * 60 * 1000;
 /** 여러 항목을 읽음으로 바꾼 뒤 '되돌리기'를 보이는 시간. */
 const UNDO_MS = 8000;
 /** 새 버전 확인 간격(분). 확인 주기(1·2·5·10·15분)로 나누어떨어져야 정확히 1시간마다 확인한다. */
@@ -187,6 +190,45 @@ class AppModel {
       this.isRefreshing = false;
       this.emit();
     }
+    // 확인이 도는 동안 끝난 지난 활동 불러오기는 확인이 끝난 뒤 넣는다(확인 결과가 덮지 않게).
+    this.applyBackfill();
+  }
+
+  /**
+   * 활동 차트의 지난 날짜(잔디 6개월 중 GitBell이 세기 전)를 GitHub에서 한 번 불러온다. 확인 뒤에 뒤에서 돌린다.
+   * 이미 불러왔거나, 불러오는 중이거나, API 한도가 넉넉하지 않으면 하지 않는다. 실패하면 30분 뒤 다시 한다.
+   */
+  maybeBackfill(api) {
+    if (this.demo || this.backfilling || this.state.backfill || !this.state.dailyStartedAt || typeof api.graphql !== 'function') return;
+    const now = this.deps.now();
+    if (this.backfillFailedAt && Date.parse(now) - this.backfillFailedAt < BACKFILL_RETRY_MS) return;
+    if (api.remaining && api.remaining() != null && api.remaining() < WatchState.DEFAULT_CONFIG.lowBudget) return;
+    const start = heatmapStart(now, HEATMAP_WEEKS).toISOString();
+    const cutoff = this.state.dailyStartedAt;
+    const account = this.accountGeneration;
+    this.backfilling = (async () => {
+      try {
+        const { daily } = await backfillDaily(api, { me: this.state.me, start, cutoff, includeOwn: this.settings.includeOwnActivity });
+        if (account !== this.accountGeneration) return;
+        this.pendingBackfill = { daily, start, cutoff };
+      } catch {
+        this.backfillFailedAt = Date.parse(this.deps.now());
+      } finally {
+        this.backfilling = null;
+        this.emit();
+      }
+      if (!this.isRefreshing) this.applyBackfill();
+    })();
+    this.emit();
+  }
+
+  /** 불러온 지난 활동을 상태에 넣는다. 확인이 도는 중이면 끝난 뒤에 넣는다. */
+  applyBackfill() {
+    if (!this.pendingBackfill || this.isRefreshing) return;
+    mergeBackfill(this.state, this.pendingBackfill, this.deps.now());
+    this.pendingBackfill = null;
+    this.saveState();
+    this.emit();
   }
 
   /**
@@ -252,6 +294,7 @@ class AppModel {
       const toNotify = Prefs.eventsToNotify(result.newEvents.filter((event) => stillUnread.has(event.id)),
         this.settings.notificationPrefs, this.settings.display, this.state.me);
       if (toNotify.length) this.deps.notifier.post(toNotify, this.settings.notificationPrefs.playsSound);
+      this.maybeBackfill(api);
     } catch (error) {
       if (account !== this.accountGeneration) return;
       if (error && error.kind === 'unauthorized') {
@@ -709,6 +752,8 @@ class AppModel {
         dayCount: CHART_DAYS,
         heatmap: heatmap(this.state.daily || {}, { now: this.deps.now(), weeks: HEATMAP_WEEKS, display: this.settings.display }),
         weekCount: HEATMAP_WEEKS,
+        /** GitHub에서 지난 활동을 불러오는 중이면 차트에 알린다. */
+        backfilling: Boolean(this.backfilling),
       } : null,
       showingSearch: this.showingSearch,
       query: { ...this.settings.query, search: this.search },

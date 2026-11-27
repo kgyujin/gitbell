@@ -550,9 +550,9 @@ function renderChart() {
     <div class="settings-header">${iconButton('chevronLeft', t('Back'), actionAttrs('setShowingChart', false))}<strong>${esc(t('Activity chart'))}</strong></div>
     <div class="settings-scroll" id="chartScroll">
       ${settingsSection(format('Last %lld days', chart.dayCount), `<div class="chart-card">${legend}${daily}${table}</div>`)}
-      ${settingsSection(t('Last 6 months'), renderHeatmapCard(chart.heatmap))}
+      ${settingsSection(t('Last 6 months'), (chart.backfilling ? `<p class="secondary small chart-loading" role="status">${icon('refresh', 'spinning-icon')}${esc(t('Loading past activity from GitHub…'))}</p>` : '') + renderHeatmapCard(chart.heatmap))}
       ${repos}
-      <p class="secondary small">${esc(t('GitBell counts the activity it has checked, by day. Days when GitBell was off may look empty.'))}</p>
+      <p class="secondary small">${esc(t('GitBell counts the activity it checks, by day. Days before that were loaded once from GitHub (past commits count default-branch commits).'))}</p>
     </div>`;
   for (const fill of document.querySelectorAll('#chart .chart-fill[data-fill]')) fill.style.width = `${fill.dataset.fill}%`;
 }
