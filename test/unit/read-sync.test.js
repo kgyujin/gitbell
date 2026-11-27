@@ -30,7 +30,7 @@ test('스레드 기억: 기록에 있는 PR·이슈의 것만 두고, 같은 스
   const state = stateWith([event('a', 5, '2026-11-09T05:00:00Z')]);
   WatchState.rememberThreads(state, [thread('100', 5, { lastReadAt: '2026-11-09T04:00:00Z' }), thread('200', 9)]);
   assert.deepEqual(Object.keys(state.threads), ['o/r#5'], '기록에 없는 PR(#9)은 기억하지 않는다');
-  assert.deepEqual(state.threads['o/r#5'], { id: '100', unread: true, lastReadAt: '2026-11-09T04:00:00Z', updatedAt: '2026-11-09T05:40:00Z', appliedReadAt: null });
+  assert.deepEqual(state.threads['o/r#5'], { id: '100', unread: true, lastReadAt: '2026-11-09T04:00:00Z', updatedAt: '2026-11-09T05:40:00Z', appliedReadAt: null, syncedAt: null });
   state.threads['o/r#5'].appliedReadAt = '2026-11-09T04:00:00Z';
   WatchState.rememberThreads(state, []);
   assert.equal(state.threads['o/r#5'].appliedReadAt, '2026-11-09T04:00:00Z', '이번에 받지 못한 스레드는 그대로 둔다');
@@ -78,7 +78,7 @@ test('GitBell → GitHub: 그 PR의 활동을 모두 읽었고, GitHub에 더 �
 
   state.threads['o/r#5'].unread = true;
   WatchState.markThreadReadOnGitHub(state, 'o/r#5', '2026-11-09T06:00:00Z');
-  assert.deepEqual(state.threads['o/r#5'], { id: '100', unread: false, lastReadAt: '2026-11-09T06:00:00Z', updatedAt: '2026-11-09T05:39:00Z', appliedReadAt: '2026-11-09T06:00:00Z' });
+  assert.deepEqual(state.threads['o/r#5'], { id: '100', unread: false, lastReadAt: '2026-11-09T06:00:00Z', updatedAt: '2026-11-09T05:39:00Z', appliedReadAt: '2026-11-09T06:00:00Z', syncedAt: '2026-11-09T06:00:00Z' });
 });
 
 test('상태 파일: 예전 상태에는 threads가 없어도 읽힌다', () => {

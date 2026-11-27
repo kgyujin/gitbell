@@ -213,11 +213,25 @@ test('데모 패널: 열지 않고 읽음 표시·묶음 읽음·되돌리기', 
   assert.equal(await window.locator('.undo-bar').count(), 0);
 
   // 단추로도 되돌린다.
-  await window.getByRole('button', { name: 'Mark everything shown as read' }).click();
+  await window.getByRole('button', { name: 'Mark all as read' }).click();
   await window.waitForSelector('.undo-bar');
   await window.locator('.undo-bar').getByRole('button', { name: 'Undo' }).click();
   await window.waitForFunction(() => document.querySelector('.header .count-badge')?.textContent === '2');
   assert.equal(await badge(), '2');
+  assert.deepEqual(errors, []);
+});
+
+test("데모 패널: '모두 읽음'은 필터를 켜 두어도 모두 읽음으로 바꾼다", async (t) => {
+  const { app, window, errors } = await launch({ args: ['--demo'] });
+  t.after(() => app.close());
+  await window.waitForSelector('.row-item');
+  assert.equal(await window.locator('.header .count-badge').textContent(), '3');
+  // 커밋 칩: 화면에는 안 읽은 커밋 1개만 보이지만 '모두 읽음'은 전부 읽음으로 바꾼다.
+  await window.getByRole('button', { name: 'Commits', exact: true }).click();
+  await window.getByRole('button', { name: 'Mark all as read' }).click();
+  await window.waitForFunction(() => !document.querySelector('.header .count-badge'));
+  assert.equal(await window.getByRole('button', { name: 'Mark all as read' }).count(), 0, '안 읽은 것이 없으면 단추를 숨긴다');
+  assert.match(await window.locator('.undo-bar').textContent(), /Marked 3 items as read/);
   assert.deepEqual(errors, []);
 });
 

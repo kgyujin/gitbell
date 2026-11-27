@@ -3,6 +3,7 @@
 'use strict';
 
 const { time } = require('./models');
+const Stats = require('./activity-stats');
 
 const CURRENT_VERSION = 2;
 
@@ -44,10 +45,14 @@ const DEFAULT_CONFIG = Object.freeze({
  */
 /**
  * threads: 기록에 있는 PR·이슈의 GitHub 알림 스레드(읽음 동기화용). 키는 'owner/repo#번호'.
- *   {id, unread, lastReadAt, updatedAt, appliedReadAt} — appliedReadAt: GitBell에 이미 반영한 lastReadAt.
+ *   {id, unread, lastReadAt, updatedAt, appliedReadAt, syncedAt} — appliedReadAt: GitBell에 이미 반영한 lastReadAt.
+ *   syncedAt: GitBell이 GitHub에서 읽음으로 바꾼 시각(그 읽음을 다시 GitBell에 반영하지 않으려고 둔다).
+ */
+/**
+ * daily: 날짜별 활동 합계(활동 통계용, activity-stats.js). 목록 기록과 달리 150개로 줄지 않고 6개월치를 남긴다.
  */
 function createState() {
-  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {}, lastRead: {}, threads: {} };
+  return { version: CURRENT_VERSION, me: '', lastChecked: null, seen: {}, history: [], checkedRepos: [], retrySince: {}, lastRead: {}, threads: {}, daily: {} };
 }
 
 /** 형식이 다르거나 망가진 상태면 로그인 이름만 남기고 비운다. 시각이 망가진 값은 버린다(확인마다 오류로 멈추지 않게). */
@@ -60,6 +65,8 @@ function migrated(state) {
     merged.retrySince = Object.fromEntries(Object.entries(merged.retrySince || {}).filter(([, value]) => valid(value)));
     merged.lastRead = Object.fromEntries(Object.entries(merged.lastRead || {}).filter(([, value]) => valid(value)));
     merged.threads = merged.threads && typeof merged.threads === 'object' ? merged.threads : {};
+    // 날짜별 합계가 없던 예전 상태는 남아 있는 기록으로 채운다.
+    merged.daily = Stats.sanitizeDaily(state.daily) || Stats.dailyFromHistory(merged.history);
     return merged;
   }
   const fresh = createState();
@@ -72,6 +79,9 @@ function clone(state) {
 }
 
 const sortNewestFirst = (a, b) => time(b.time) - time(a.time);
+
+/** GitHub 스레드와 GitBell 기록의 시각을 견줄 때 두는 여유(시계·기록 시각 차이). */
+const THREAD_SLACK = 2 * 60 * 1000;
 
 /**
  * 새 항목을 기록에 넣고, 알림을 보낼 항목을 돌려준다. state를 직접 바꾼다.
@@ -100,8 +110,10 @@ function apply(state, events, { now, includeOwn, config = DEFAULT_CONFIG }) {
     // includeOwn이어도 내 활동은 읽음으로 넣고 알리지 않는다(내가 한 일을 나에게 알릴 까닭이 없다).
     const event = { ...original, isUnread: !isFirstRun && !own };
     state.history.push(event);
+    Stats.addToDaily(state.daily || (state.daily = {}), event);
     if (event.isUnread) toNotify.push(event);
   }
+  Stats.pruneDaily(state.daily || (state.daily = {}), now);
   // 시계가 잠깐 앞으로 뛰어도(며칠 뒤) 본 항목을 지우지 않게, 지난 확인 시각과 지금 중 이른 쪽을 기준으로 지운다.
   const reference = state.lastChecked ? Math.min(time(state.lastChecked), time(now)) : time(now);
   const cutoff = reference - config.seenRetention;
@@ -210,6 +222,22 @@ function adoptingReadMarks(refreshed, current) {
   for (const event of merged.history) {
     if (marks.has(event.id)) event.isUnread = marks.get(event.id);
   }
+  // 새로고침이 도는 동안 GitHub에서도 읽음으로 바꿨다면(syncReadsToGitHub), 그 기록을 새로고침 결과가 덮지 않게 한다.
+  // 덮이면 다음 확인에서 그 읽음을 GitHub에서 읽은 것으로 보고, 그 사이 '되돌리기'한 항목을 다시 읽음으로 바꿨다.
+  for (const [key, thread] of Object.entries(merged.threads || {})) {
+    const local = current.threads && current.threads[key];
+    if (!local || local.id !== thread.id) continue;
+    if (local.syncedAt && (!thread.syncedAt || time(local.syncedAt) > time(thread.syncedAt))) {
+      thread.syncedAt = local.syncedAt;
+      if (!thread.lastReadAt || time(thread.lastReadAt) < time(local.syncedAt)) {
+        thread.unread = false;
+        thread.lastReadAt = local.lastReadAt;
+      }
+    }
+    if (local.appliedReadAt && (!thread.appliedReadAt || time(local.appliedReadAt) > time(thread.appliedReadAt))) {
+      thread.appliedReadAt = local.appliedReadAt;
+    }
+  }
   return merged;
 }
 
@@ -297,6 +325,7 @@ function rememberThreads(state, notifications) {
       lastReadAt: thread.last_read_at || null,
       updatedAt: thread.updated_at || null,
       appliedReadAt: old && old.id === String(thread.id) ? old.appliedReadAt : null,
+      syncedAt: old && old.id === String(thread.id) ? old.syncedAt || null : null,
     };
   }
   state.threads = threads;
@@ -315,7 +344,10 @@ function applyGitHubReads(state, newIds = []) {
   const fresh = new Set(newIds);
   for (const [key, thread] of Object.entries(state.threads || {})) {
     if (!thread.lastReadAt) continue;
-    const alreadyApplied = thread.appliedReadAt && time(thread.lastReadAt) <= time(thread.appliedReadAt);
+    // GitBell이 GitHub에서 읽음으로 바꾼 것이 돌아온 경우: GitHub 서버 시계가 이 PC와 조금 달라 읽은 시각이
+    // 우리가 적어 둔 시각보다 몇 초 늦을 수 있다. 그 읽음은 이미 GitBell의 것이라 다시 반영하지 않는다.
+    const ownSync = thread.syncedAt && time(thread.lastReadAt) <= time(thread.syncedAt) + THREAD_SLACK;
+    const alreadyApplied = ownSync || (thread.appliedReadAt && time(thread.lastReadAt) <= time(thread.appliedReadAt));
     for (const event of state.history) {
       if (alreadyApplied && !fresh.has(event.id)) continue;
       if (event.isUnread && threadKey(event) === key && time(event.time) <= time(thread.lastReadAt)) {
@@ -328,20 +360,22 @@ function applyGitHubReads(state, newIds = []) {
   return changed;
 }
 
-/** GitHub 스레드에 GitBell 활동보다 새 소식이 있다고 보는 여유(시계·기록 시각 차이). */
-const THREAD_SLACK = 2 * 60 * 1000;
 
 /**
  * GitBell에서 읽은 뒤 GitHub에서도 읽음으로 바꿀 스레드. 이 PR·이슈의 GitBell 활동을 모두 읽었고,
  * GitHub에서는 아직 안 읽음이며, GitHub 쪽에 GitBell이 보이지 않은 더 새 소식이 없을 때만 고른다.
+ * isShown: 화면에 보이는 항목인지(숨긴 저장소·'봇 활동 숨기기'). 숨긴 항목은 사용자가 읽을 수 없으니
+ * '모두 읽었는지'에 세지 않는다(숨긴 봇 댓글 하나 때문에 그 PR의 GitHub 알림이 계속 안 읽음으로 남았다).
  */
-function threadsToMarkRead(state, keys) {
+function threadsToMarkRead(state, keys, isShown = () => true) {
   const result = [];
   for (const key of new Set(keys)) {
     const thread = state.threads && state.threads[key];
     if (!thread || !thread.unread) continue;
     const events = state.history.filter((event) => threadKey(event) === key);
-    if (events.length === 0 || events.some((event) => event.isUnread)) continue;
+    const shown = events.filter(isShown);
+    if (shown.length === 0 || shown.some((event) => event.isUnread)) continue;
+    // GitHub 스레드의 갱신 시각은 숨긴 활동(봇 댓글)에도 바뀌므로 비교는 모든 활동으로 한다.
     const newest = Math.max(...events.map((event) => time(event.time)));
     if (thread.updatedAt && time(thread.updatedAt) > newest + THREAD_SLACK) continue;
     result.push({ key, id: thread.id });
@@ -349,13 +383,22 @@ function threadsToMarkRead(state, keys) {
   return result;
 }
 
-/** GitHub에서 읽음으로 바꾼 뒤. 그 시각을 반영한 것으로 두어 다음 확인에서 다시 반영하지 않는다. */
-function markThreadReadOnGitHub(state, key, now) {
+/**
+ * GitHub에서 읽음으로 바꾼 뒤. 그 시각을 반영한 것으로 두어 다음 확인에서 다시 반영하지 않는다.
+ * GitHub에서 읽은 스레드는 그 시각까지 모두 읽은 것이므로, 숨긴 항목(봇 댓글)도 읽음으로 맞춘다
+ * (나중에 숨김을 풀었을 때 GitHub에서는 읽은 것이 GitBell에서만 안 읽음으로 보이지 않게).
+ * 보이는 항목은 건드리지 않는다(요청이 도는 동안 사용자가 '되돌리기'한 것을 다시 읽음으로 바꾸지 않게).
+ */
+function markThreadReadOnGitHub(state, key, now, isShown = () => true) {
   const thread = state.threads && state.threads[key];
   if (!thread) return;
   thread.unread = false;
   thread.lastReadAt = now;
   thread.appliedReadAt = now;
+  thread.syncedAt = now;
+  for (const event of state.history) {
+    if (threadKey(event) === key && !isShown(event) && time(event.time) <= time(now)) event.isUnread = false;
+  }
 }
 
 module.exports = {
